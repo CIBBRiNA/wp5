@@ -48,6 +48,17 @@ effort_EU$gear_lvl4 <- substr(effort_EU$Metier, 1,3)
 effort_MS$gear_lvl4 <- substr(effort_MS$Metier, 1,3)
 effort_rect$gear_lvl4 <- substr(effort_rect$metier, 1,3)
 
+# metier level 5
+effort_EU$metier_lvl5 <- substr(effort_EU$Metier, 1,7)
+effort_MS$metier_lvl5 <- substr(effort_MS$Metier, 1,7)
+effort_rect$metier_lvl5 <- substr(effort_rect$metier, 1,7)
+
+#Vessel length grouped
+effort_EU$VL_GR <- effort_EU$Vessel.Length.Category
+effort_EU$VL_GR[effort_EU$VL_GR %in% c("VL0006", "VL0008", "VL0010", "VL0612", "VL0812", "VL1012")] <- 'VL0012'
+effort_MS$VL_GR <- effort_MS$Vessel.Length.Category
+effort_MS$VL_GR[effort_MS$VL_GR %in% c("VL0006", "VL0008", "VL0010", "VL0612", "VL0812", "VL1012")] <- 'VL0012'
+
 #Area shapefile
 
 area <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Areas_20160601_cut_dense_3857.shp", quiet = TRUE)
@@ -76,7 +87,20 @@ rect <- subset(rect, select=c(icesname, geometry))
 
 Public data from EU STECF Fisheries Dependent Information data call are downloaded from: https://stecf.ec.europa.eu/data-dissemination/fdi_en
 
-Data are filtered to match the CIBBRiNA case studies.
+Data are filtered to match the CIBBRiNA case studies. Only case studies where it makes sense to extract from FDI are included:
+
+The fleet definitions should be validated by CS leads that the selection based on “country*gear*area*(deep)” is appropriate and relevant for their case study. Some may need a more precise selection — for example, by using DCF Métiers at Level 5 or 6, or by including vessel length ranges.
+
+ * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany. Norway and Iceland does not report to the EU FDI data call
+ * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
+ * Case study 3: UK static nets - UK data only available until 2020.
+ * Case study 4: Deepwater longlines in Portuguese waters - Portugal - deepwater indicator DEEP
+ * Case study 5: Surface longlines in Madeira waters  - included. Longlines in area 34.1.2
+ * Case study 6: UK longlines - UK data only available until 2020.
+ * Case study 7: Pelagic trawl fisheries - included
+ * Case study 8: Demersal trawl fisheries in Greater North Sea - Belgium and the Netherlands
+ 
+
 
 ```{r fleets}
 
@@ -84,8 +108,14 @@ Data are filtered to match the CIBBRiNA case studies.
 effort_MS$CSfleet <- ''
 effort_EU$CSfleet <- ''
 effort_rect$CSfleet <- ''
+
+effort_MS_conf <- effort_MS
+
 #CS1 Northern gillnets
 effort_EU$CSfleet[effort_EU$gear_lvl4 %in% c("GNC","GND","GNS","GTR","GTN") & effort_EU$area %in% c("27.5.a","27.4.a","27.4.b","27.4.c","27.3.a.20","27.3.a.21","27.3.b.23","27.3.c.22","27.3.d.24","27.3.d.25","27.3.d.26")] <- 'CS1_Gillnet_North'
+
+effort_MS_conf$CSfleet[effort_MS_conf$gear_lvl4 %in% c("GNC","GND","GNS","GTR","GTN") & effort_MS_conf$area %in% c("27.5.a","27.4.a","27.4.b","27.4.c","27.3.a.20","27.3.a.21","27.3.b.23","27.3.c.22","27.3.d.24","27.3.d.25","27.3.d.26")] <- 'CS1_Gillnet_North'
+
 effort_MS$CSfleet[effort_MS$gear_lvl4 %in% c("GNC","GND","GNS","GTR","GTN") & effort_MS$area %in% c("27.5.a","27.4.a","27.4.b","27.4.c","27.3.a.20","27.3.a.21","27.3.b.23","27.3.c.22","27.3.d.24","27.3.d.25","27.3.d.26") & effort_MS$Country %in% c("Denmark","Sweden","Poland","Germany")] <- 'CS1_Gillnet_North'
 
 effort_rect$CSfleet[effort_rect$gear_lvl4 %in% c("GNC","GND","GNS","GTR","GTN") & effort_rect$area %in% c("27.5.a","27.4.a","27.4.b","27.4.c","27.3.a.20","27.3.a.21","27.3.b.23","27.3.c.22","27.3.d.24","27.3.d.25","27.3.d.26")] <- 'CS1_Gillnet_North'
@@ -93,14 +123,21 @@ effort_rect$CSfleet[effort_rect$gear_lvl4 %in% c("GNC","GND","GNS","GTR","GTN") 
 
 #CS2 Southern gillnets
 effort_EU$CSfleet[effort_EU$Gear.Type %in% c("GNC","GND","GNS","GTR","GTN") & effort_EU$area %in% c("27.8.c","27.9.a")] <- 'CS2_Gillnet_South'
+
+effort_MS_conf$CSfleet[effort_MS_conf$Gear.Type %in% c("GNC","GND","GNS","GTR","GTN") & effort_MS_conf$area %in% c("27.8.c","27.9.a")] <- 'CS2_Gillnet_South'
+
 effort_MS$CSfleet[effort_MS$Gear.Type %in% c("GNC","GND","GNS","GTR","GTN") & effort_MS$area %in% c("27.8.c","27.9.a") & effort_MS$Country %in% c("Spain")] <- 'CS2_Gillnet_South'
 
 effort_rect$CSfleet[effort_rect$gear_type %in% c("GNC","GND","GNS","GTR","GTN") & effort_rect$area %in% c("27.8.c","27.9.a")] <- 'CS2_Gillnet_South'
 
 #CS3 UK static nets - missing UK
 effort_MS$CSfleet[effort_MS$Gear.Type %in% c("GNC","GND","GNS","GTR","GTN") & effort_MS$Country=='United Kingdom'] <- 'CS3_Gillnet_UK'
+
 #CS4 Deepwater longlines in portuguese waters
 effort_MS$CSfleet[effort_MS$Gear.Type %in% c("LHP","LLD","LLS") & effort_MS$Country=='Portugal' & !(is.na(effort_MS$Deep)) & effort_MS$area %in% c("34.1.2","27.10.a","27.9.a" )] <- 'CS4_Longlines_DEEP_PRT'
+
+effort_MS_conf$CSfleet[effort_MS_conf$Gear.Type %in% c("LHP","LLD","LLS") & !(is.na(effort_MS_conf$Deep)) & effort_MS_conf$area %in% c("34.1.2","27.10.a","27.9.a" )] <- 'CS4_Longlines_DEEP_PRT'
+
 effort_EU$CSfleet[effort_EU$Gear.Type %in% c("LHP","LLD","LLS") & !(is.na(effort_EU$Deep)) & effort_EU$area %in% c("34.1.2","27.10.a","27.9.a" )] <- 'CS4_Longlines_DEEP_PRT'
 
 effort_rect$CSfleet[effort_rect$gear_type %in% c("LHP","LLD","LLS") & !(is.na(effort_rect$deep)) & effort_rect$area %in% c("34.1.2","27.10.a","27.9.a" )] <- 'CS4_Longlines_DEEP_PRT'
@@ -108,6 +145,9 @@ effort_rect$CSfleet[effort_rect$gear_type %in% c("LHP","LLD","LLS") & !(is.na(ef
 
 #CS5 Surface longlines in Madeira waters
 effort_MS$CSfleet[effort_MS$Gear.Type %in% c("LHP","LLD","LLS") & effort_MS$Country=='Portugal' & is.na(effort_MS$Deep) & effort_MS$area %in% c("34.1.2" )] <- 'CS5_Surface_Longlines_Madeira'
+
+effort_MS_conf$CSfleet[effort_MS_conf$Gear.Type %in% c("LHP","LLD","LLS") & is.na(effort_MS_conf$Deep) & effort_MS_conf$area %in% c("34.1.2" )] <- 'CS5_Surface_Longlines_Madeira'
+
 effort_EU$CSfleet[effort_EU$Gear.Type %in% c("LHP","LLD","LLS") & is.na(effort_EU$Deep) & effort_EU$area %in% c("34.1.2")] <- 'CS5_Surface_Longlines_Madeira'
 
 #CS6 UK longlines
@@ -115,12 +155,18 @@ effort_MS$CSfleet[effort_MS$Country=='United Kingdom' & effort_MS$Gear.Type %in%
 
 #CS7 Pelagic trawls
 effort_MS$CSfleet[effort_MS$Country %in% c('United Kingdom','Denmark','Ireland','Netherlands') & effort_MS$Gear.Type %in% c("OTM","PTM") & effort_MS$area %in% c("27.4.a","27.4.b","27.4.c","27.6.a","27.6.b","27.7.a","27.7.b","27.7.c","27.7.d","27.7.e","27.7.f","27.7.g","27.7.h","27.7.j","27.7.k","27.8.a")] <- 'CS7_Pelagic_trawl'
+
+effort_MS_conf$CSfleet[effort_MS_conf$Gear.Type %in% c("OTM","PTM") & effort_MS_conf$area %in% c("27.4.a","27.4.b","27.4.c","27.6.a","27.6.b","27.7.a","27.7.b","27.7.c","27.7.d","27.7.e","27.7.f","27.7.g","27.7.h","27.7.j","27.7.k","27.8.a")] <- 'CS7_Pelagic_trawl'
+
 effort_EU$CSfleet[effort_EU$Gear.Type %in% c("OTM","PTM") & effort_EU$area %in% c("27.4.a","27.4.b","27.4.c","27.6.a","27.6.b","27.7.a","27.7.b","27.7.c","27.7.d","27.7.e","27.7.f","27.7.g","27.7.h","27.7.j","27.7.k","27.8.a")] <- 'CS7_Pelagic_trawl'
 
 effort_rect$CSfleet[effort_rect$gear_type %in% c("OTM","PTM") & effort_rect$area %in% c("27.4.a","27.4.b","27.4.c","27.6.a","27.6.b","27.7.a","27.7.b","27.7.c","27.7.d","27.7.e","27.7.f","27.7.g","27.7.h","27.7.j","27.7.k","27.8.a")] <- 'CS7_Pelagic_trawl'
 
 #CS8 Demersal trawls
 effort_MS$CSfleet[effort_MS$Country %in% c('Belgium','Netherlands') & effort_MS$Gear.Type %in% c('OTB','PTB','TBB') & effort_MS$area %in% c("27.3.a.20","27.4.b","27.4.c","27.7.d")] <- 'CS8_Demersal_trawl'
+
+effort_MS_conf$CSfleet[effort_MS_conf$Gear.Type %in% c('OTB','PTB','TBB') & effort_MS_conf$area %in% c("27.3.a.20","27.4.b","27.4.c","27.7.d")] <- 'CS8_Demersal_trawl'
+
 effort_EU$CSfleet[effort_EU$Gear.Type %in% c('OTB','PTB','TBB') & effort_EU$area %in% c("27.3.a.20","27.4.b","27.4.c","27.7.d")] <- 'CS8_Demersal_trawl'
 
 effort_rect$CSfleet[effort_rect$gear_type %in% c('OTB','PTB','TBB') & effort_rect$area %in% c("27.3.a.20","27.4.b","27.4.c","27.7.d")] <- 'CS8_Demersal_trawl'
@@ -128,6 +174,7 @@ effort_rect$CSfleet[effort_rect$gear_type %in% c('OTB','PTB','TBB') & effort_rec
 
 effort_EU1 <- effort_EU %>% filter(effort_EU$CSfleet!='')
 effort_MS1 <- effort_MS %>% filter(effort_MS$CSfleet!='')
+effort_MS_conf1 <- effort_MS_conf %>% filter(effort_MS_conf$CSfleet!='')
 effort_rect1 <- effort_rect %>% filter(effort_rect$CSfleet!='')
 
 ```
@@ -135,8 +182,8 @@ effort_rect1 <- effort_rect %>% filter(effort_rect$CSfleet!='')
 ```{r Data}
 
 #Only keep requested variables
-effort_EU2 <- subset(effort_EU1, select=c(Country,Year,Quarter,area,Gear.Type, Mesh.size.range,Metier,Vessel.Length.Category,Total.days.at.sea,Total.Fishing.Days,Total.kW.days.at.Sea,Total.GT.days.at.sea,Total.kW.fishing.days,Total.GT.fishing.days,Hours.at.Sea,kW.hours.at.sea,GT.hours.at.sea,CSfleet))
-effort_MS2 <- subset(effort_MS1, select=c(Country,Year,Quarter,area,Gear.Type, Mesh.size.range,Metier,Vessel.Length.Category,Total.days.at.sea,Total.Fishing.Days,Total.kW.days.at.Sea,Total.GT.days.at.sea,Total.kW.fishing.days,Total.GT.fishing.days,Hours.at.Sea,kW.hours.at.sea,GT.hours.at.sea,CSfleet))
+effort_EU2 <- subset(effort_EU1, select=c(Country,Year,Quarter,area,Gear.Type, Mesh.size.range,Metier,metier_lvl5, Vessel.Length.Category,VL_GR,Total.days.at.sea,Total.Fishing.Days,Total.kW.days.at.Sea,Total.GT.days.at.sea,Total.kW.fishing.days,Total.GT.fishing.days,Hours.at.Sea,kW.hours.at.sea,GT.hours.at.sea,CSfleet))
+effort_MS2 <- subset(effort_MS1, select=c(Country,Year,Quarter,area,Gear.Type, Mesh.size.range,Metier,metier_lvl5,Vessel.Length.Category,VL_GR,Total.days.at.sea,Total.Fishing.Days,Total.kW.days.at.Sea,Total.GT.days.at.sea,Total.kW.fishing.days,Total.GT.fishing.days,Hours.at.Sea,kW.hours.at.sea,GT.hours.at.sea,CSfleet))
 
 #Effort by CS fleet and year
 FDI_fleet_EU <- effort_EU2 %>%
@@ -184,6 +231,15 @@ FDI_fleet_confidential <- subset(FDI_fleet_confidential, select=c(CSfleet, Count
 FDI_fleet_confidential$Year <- as.character(FDI_fleet_confidential$Year)
 FDI_fleet_MS_tot <- rbind(FDI_fleet_MS, FDI_fleet_confidential)
 
+FDI_rows_confidential <- effort_MS_conf1
+#FDI_rows_confidential$confidential[FDI_rows_confidential$Total.days.at.sea=='C'] <- 'Y'
+FDI_rows_confidential$confidential <- ifelse(FDI_rows_confidential$Total.Fishing.Days=='C', 'Y', 'N')
+FDI_rows_confidential$n_rows <- 1
+FDI_rows_confidential$Year <- as.character(FDI_rows_confidential$Year)
+FDI_rows_confidential_sum <- FDI_rows_confidential %>%
+  group_by(CSfleet, Country, Year, confidential) %>%
+  summarize(n_rows=sum(n_rows, na.rm=T))
+
 country_colors <- c(
   "Sweden" = "#1f77b4",         # blue
   "Germany" = "#ff7f0e",        # orange
@@ -212,6 +268,14 @@ vessel_length_colors <- c(
   "VL40XX"  = "#4a1486"   # deep purple
 )
 
+vessel_length_colors_reduced <- c(
+  "NK"      = "#d9d9d9",  # neutral gray for unknown
+  "VL0012"  = "#4292c6",  # medium/deeper blue (from the 8–12 range)
+  "VL1218"  = "#08519c",  # dark blue
+  "VL1824"  = "#08306b",  # very dark blue
+  "VL2440"  = "#6a51a3",  # purple
+  "VL40XX"  = "#4a1486"   # deep purple
+)
 ```
 
 
@@ -298,11 +362,23 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS1DASYear, fig.dim= c(8, 6)}
+```{r CS1DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS1_Gillnet_North')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS1 Northern gillnet EU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -314,6 +390,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS1_Gillnet_North')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -321,6 +406,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -335,9 +430,20 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS1FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS1_Gillnet_North')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS1 Northern gillnet EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -349,6 +455,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS1_Gillnet_North')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -356,6 +471,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### kW Days at sea by year
@@ -369,9 +494,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS1kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS1_Gillnet_North')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS1 Northern gillnet EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -383,6 +520,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS1_Gillnet_North')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -390,6 +536,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### kW Fishing days by year
@@ -402,9 +558,21 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS1kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS1_Gillnet_North')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "kW Fishing days") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS1 Northern gillnet EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -412,7 +580,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS1_Gillnet_North')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -420,10 +597,60 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS1_Gillnet_North')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS1nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum1 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS1_Gillnet_North')
+
+ggplot(FDI_rows_confidential_sum1, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum1, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum1, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum1, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
 
 ### Vessel length
 
@@ -446,6 +673,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -487,6 +723,93 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.Category)) +
   geom_bar(stat = "identity", position = "fill") +
   scale_fill_manual(values = vessel_length_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS1 Northern Gillnet) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS1_Gillnet_North') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS1 Northern gillnet EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS1_Gillnet_North') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS1 Northern gillnet by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS1 Northern gillnet by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
   facet_wrap(~ Country, scales = "free_x") +
   scale_y_continuous(labels = scales::percent) +
   labs(
@@ -624,6 +947,165 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS1_Gillnet_North') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS1 Northern gillnet EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS1_Gillnet_North') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS1 Northern gillnet by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS1 Northern gillnet by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS1 Northern Gillnet) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS1FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS1 Gillnet North)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS1_Gillnet_North') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS1 Gillnet North)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 ### Maps
 
 ```{r CS1area, , echo=FALSE, out.width="80%", fig.cap="FDI EU CS1 Northern gillnet effort, ICES areas (2023)"}
@@ -656,11 +1138,23 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS2DASYear, fig.dim= c(8, 6)}
+```{r CS2DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS2_Gillnet_South')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS2 Southern gillnet EU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -672,6 +1166,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS2_Gillnet_South')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -679,6 +1182,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -693,9 +1206,20 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS2FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS2_Gillnet_South')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU"), x = "Year", y = "Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS2 Southern gillnet EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -707,6 +1231,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS2_Gillnet_South')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -714,6 +1247,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Days at sea by year
@@ -727,9 +1271,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS2kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS2_Gillnet_South')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS2 Southern gillnet EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -741,6 +1297,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS2_Gillnet_South')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -748,6 +1313,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Fishing days by year
@@ -760,9 +1336,21 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS2kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS2_Gillnet_South')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU"), x = "Year", y = "kW Fishing days") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS2 Southern gillnet EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -770,7 +1358,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS2_Gillnet_South')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -778,10 +1375,59 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS2_Gillnet_South')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS2nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum2 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS2_Gillnet_South')
+
+ggplot(FDI_rows_confidential_sum2, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum2, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum2, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum2, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
 
 ### Vessel length
 
@@ -802,6 +1448,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS2 Southern gillnet EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern gillnet EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -859,6 +1514,92 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 
 ```
 
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS2FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS2_Gillnet_South') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS2 Southern Gillnet EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS2 Southern Gillnet EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS2_Gillnet_South') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS2 Southern Gillnet by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS2 Southern Gillnet by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS2 Southern Gillnet) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
 
 ### Metier level 6
 
@@ -980,6 +1721,165 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS2FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS2_Gillnet_South') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS2 Southern Gillnet EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS2_Gillnet_South') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS2 Southern Gillnet by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS2 Southern Gillnet by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS2 Southern Gillnet) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS2FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS2 Gillnet South)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS2_Gillnet_South') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS2 Gillnet South)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 ### Maps
 
 ```{r CS2area, , echo=FALSE, out.width="80%", fig.cap="FDI EU CS2 Southern gillnet effort, ICES areas (2023)"}
@@ -1008,8 +1908,9 @@ The UK CS data are only extracted for the MS level, and are only available until
 The plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
 
 
-```{r CS3DASYear, fig.dim= c(8, 6)}
+```{r CS3DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS3_Gillnet_UK')
+
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
@@ -1129,6 +2030,74 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 
 ```
 
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDVLG, fig.dim= c(6, 4)}
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS3_Gillnet_UK') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS3 UK static nets by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS3 UK static nets by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS3 UK static nets) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
 
 ### Metier level 6
 
@@ -1200,6 +2169,120 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDMet5, fig.dim= c(6, 4)}
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS3_Gillnet_UK') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS3 UK static nets by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS3 UK static nets by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS3 UK static nets) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS3FDQ, fig.dim= c(6, 4)}
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS3_Gillnet_UK') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS3 static nets UK)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
 
 ## CIBBRiNA Case Study 4: Deepwater longlines in Portuguese waters {.tabset}
 
@@ -1221,11 +2304,23 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS4DASYear, fig.dim= c(8, 6)}
+```{r CS4DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1237,6 +2332,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -1244,6 +2348,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MSS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -1258,9 +2372,20 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS4FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1272,6 +2397,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -1279,6 +2413,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Days at sea by year
@@ -1292,9 +2437,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS4kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1302,7 +2459,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kW Days at sea") +
+  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters MS"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1313,6 +2479,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### kW Fishing days by year
@@ -1325,9 +2501,20 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS4kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "kW Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1335,7 +2522,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1343,10 +2539,59 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS4_Longlines_DEEP_
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS4nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum4 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT')
+
+ggplot(FDI_rows_confidential_sum4, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum4, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum4, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum4, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
 
 ### Vessel length
 
@@ -1367,6 +2612,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1424,6 +2678,92 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 
 ```
 
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS4FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS4 Deepwater longlines in Portuguese waters) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
 
 ### Metier level 6
 
@@ -1545,6 +2885,165 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS4FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%  group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Top 10 metiers by total fishing days (no ties)
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS, na.rm = TRUE), .groups = "drop") %>%
+  slice_max(Total, n = 10, with_ties = FALSE) %>%   # ensures exactly 10
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS4 Deepwater longlines in Portuguese waters by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS4 Deepwater longlines in Portuguese waters) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS4FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS4 Deepwater longlines in Portuguese waters)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS4_Longlines_DEEP_PRT') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS4 Deepwater longlines in Portuguese waters)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 ### Maps
 
 ```{r CS4area, , echo=FALSE, out.width="80%", fig.cap="FDI EU CS4 Longlines effort, ICES areas (2023)"}
@@ -1579,11 +3078,23 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS5DASYear, fig.dim= c(8, 6)}
+```{r CS5DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1595,6 +3106,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -1602,6 +3122,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -1616,9 +3146,21 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS5FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "Fishing days") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1630,6 +3172,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -1637,6 +3188,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Days at sea by year
@@ -1650,9 +3212,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS5kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters waters EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1660,7 +3234,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS5_Surface_Longlines_Madei
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kW Days at sea") +
+  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters MS"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1671,6 +3254,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Fishing days by year
@@ -1683,9 +3277,21 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS5kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "kW Fishing days") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1693,7 +3299,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS5_Surface_Longlines_Madei
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1701,10 +3316,60 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS5_Surface_Longlin
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS5nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum5 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira')
+
+ggplot(FDI_rows_confidential_sum5, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum5, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum5, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum5, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
 
 ### Vessel length
 
@@ -1725,6 +3390,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -1766,6 +3440,93 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.Category)) +
   geom_bar(stat = "identity", position = "fill") +
   scale_fill_manual(values = vessel_length_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS5 Surface longlines in Madeira waters) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS5FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS5 Surface longlines in Madeira waters EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS5 Surface longlines in Madeira waters by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS5 Surface longlines in Madeira waters by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
   facet_wrap(~ Country, scales = "free_x") +
   scale_y_continuous(labels = scales::percent) +
   labs(
@@ -1903,6 +3664,165 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS5FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS5 Surface longlines in Madeira waters EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS5 Surface longlines in Madeira waters by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS5 Surface longlines in Madeira waters by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS5 Surface longlines in Madeira waters) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS5FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS5 Surface longlines in Madeira waters)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS5_Surface_Longlines_Madeira') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS5 Surface longlines in Madeira waters)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 
 
 ## CIBBRiNA Case Study 6: UK longlines {.tabset}
@@ -1921,7 +3841,7 @@ The UK CS data are only extracted for the MS level, and are only available until
 The plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
 
 
-```{r CS6DASYear, fig.dim= c(8, 6)}
+```{r CS6DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS6_Longlines_UK')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -2042,6 +3962,74 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 
 ```
 
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDVLG, fig.dim= c(6, 4)}
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS6_Longlines_UK') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS6 UK longlines by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS6 UK longlines by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS6 UK longlines) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
 
 ### Metier level 6
 
@@ -2113,7 +4101,120 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
 
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDMet5, fig.dim= c(6, 4)}
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS6_Longlines_UK') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS6 UK longlines by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS6 UK longlines by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS6 UK longlines) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS6FDQ, fig.dim= c(6, 4)}
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS6_Longlines_UK') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS6 UK longlines)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
 
 ## CIBBRiNA Case Study 7: Pelaic trawl fisheries {.tabset}
 
@@ -2133,19 +4234,41 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS7DASYear, fig.dim= c(8, 6)}
+```{r CS7DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS7_Pelagic_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 
 FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS7_Pelagic_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
   labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2156,6 +4279,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -2170,9 +4303,20 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS7FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS7_Pelagic_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2184,6 +4328,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS7_Pelagic_trawl')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -2191,6 +4344,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Days at sea by year
@@ -2204,9 +4368,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS7kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS7_Pelagic_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2214,7 +4390,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS7_Pelagic_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kW Days at sea") +
+  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries MS"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2225,6 +4410,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### kW Fishing days by year
@@ -2237,9 +4432,21 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS7kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS7_Pelagic_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "kW Fishing days") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2247,7 +4454,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS7_Pelagic_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2255,10 +4471,59 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS7_Pelagic_trawl')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS7nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum7 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS7_Pelagic_trawl')
+
+ggplot(FDI_rows_confidential_sum7, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum7, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum7, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum7, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
 
 ### Vessel length
 
@@ -2279,6 +4544,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2320,6 +4594,93 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.Category)) +
   geom_bar(stat = "identity", position = "fill") +
   scale_fill_manual(values = vessel_length_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS7 Pelagic trawl fisheries) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS7_Pelagic_trawl') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS7 Pelagic trawl fisheries EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS7_Pelagic_trawl') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS7 Pelagic trawl fisheries by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS7 Pelagic trawl fisheries by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
   facet_wrap(~ Country, scales = "free_x") +
   scale_y_continuous(labels = scales::percent) +
   labs(
@@ -2457,6 +4818,165 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
 
 ```
 
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS7_Pelagic_trawl') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS7 Pelagic trawl fisheries EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+# by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%  group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Top 10 metiers by total fishing days (no ties)
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS, na.rm = TRUE), .groups = "drop") %>%
+  slice_max(Total, n = 10, with_ties = FALSE) %>%   # ensures exactly 10
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS7 Pelagic trawl fisheries by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS7 Pelagic trawl fisheries by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS7 Pelagic trawl fisheries) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS7FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS7 Pelagic trawl fisheries)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS7_Pelagic_trawl') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS7 Pelagic trawl fisheries)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 ### Maps
 
 ```{r CS7area, , echo=FALSE, out.width="80%", fig.cap="FDI EU CS7 Pelagic trawl effort, ICES areas (2023)"}
@@ -2489,19 +5009,41 @@ The second plot is showing the effort as Days at sea by year, when filtering the
 The third plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
 
 
-```{r CS8DASYear, fig.dim= c(8, 6)}
+```{r CS8DASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS8_Demersal_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = SeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = SeaDaysEU / SeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = SeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(SeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$SeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EUU", 
+       x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 
 FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS8_Demersal_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
   labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU",
+       x = "Year", y = "Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2512,6 +5054,16 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) 
   labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = SeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Fishing days by year
@@ -2526,9 +5078,20 @@ The third plot is showing the effort as Fishing days by year, when filtering the
 
 ```{r CS8FDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS8_Demersal_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = FishingDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = FishingDaysEU / FishingDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = FishingDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(FishingDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$FishingDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU", 
+       x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2540,6 +5103,15 @@ ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) 
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS8_Demersal_trawl')
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
@@ -2547,6 +5119,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill=Countr
   labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = FishingDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Days at sea by year
@@ -2560,9 +5143,21 @@ The third plot is showing the effort as kW Days at sea by year, when filtering t
 
 ```{r CS8kWDASYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS8_Demersal_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWSeaDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "kW Days at sea") +
+
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWSeaDaysEU / kWSeaDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWSeaDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWSeaDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Days at sea",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWSeaDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU", 
+       x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2570,7 +5165,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS8_Demersal_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kW Days at sea") +
+  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea MS"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "kW Days at sea (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2581,6 +5185,17 @@ ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)
   labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kW Days at sea") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWSeaDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea MS",
+       x = "Year", y = "kW Days at sea (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
 ```
 
 ### kW Fishing days by year
@@ -2593,9 +5208,20 @@ The third plot is showing the effort as kW Fishing days by year, when filtering 
 
 ```{r CS8kWFDYear, fig.dim= c(6, 4)}
 FDI_CS_fleet_EU <- FDI_fleet_EU %>% filter(CSfleet=='CS8_Demersal_trawl')
-ggplot(FDI_CS_fleet_EU, aes(x = factor(Year), y = kWFishDaysEU)) +
-  geom_bar(stat = "identity", fill = "steelblue") +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "kW Fishing days") +
+# First calculate index (base 2013 = 100)
+FDI_CS_fleet_EU <- FDI_CS_fleet_EU %>%
+  mutate(Index2013 = kWFishDaysEU / kWFishDaysEU[Year == 2013] * 100)
+
+ggplot(FDI_CS_fleet_EU, aes(x = factor(Year))) +
+  geom_bar(aes(y = kWFishDaysEU), stat = "identity", fill = "steelblue") +
+  geom_line(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013), group = 1),
+            color = "red", size = 1) +
+  geom_point(aes(y = Index2013 * max(kWFishDaysEU) / max(Index2013)), 
+             color = "red", size = 2) +
+    # Primary and secondary axes
+  scale_y_continuous(name = "kW Fishing days",sec.axis = sec_axis(~ . * max(FDI_CS_fleet_EU$Index2013) / max(FDI_CS_fleet_EU$kWFishDaysEU),name = "Index (2013 = 100)")) +
+    labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU", 
+       x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2603,7 +5229,16 @@ FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS8_Demersal_trawl')
 ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kW Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2611,9 +5246,57 @@ FDI_CS_fleet_MS_tot <- FDI_fleet_MS_tot %>% filter(CSfleet=='CS8_Demersal_trawl'
 ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
   geom_bar(stat = "identity") +
   scale_fill_manual(values = country_colors) +
-  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kWFishing days") +
+  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS"), x = "Year", y = "kW Fishing days") +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_CS_fleet_MS_tot, aes(x = factor(Year), y = kWFishDaysMS, fill = Country)) +
+  geom_bar(stat = "identity", position = "fill") +   
+  scale_y_continuous(labels = scales::percent) +     
+  scale_fill_manual(values = country_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU MS",
+       x = "Year", y = "kW Fishing days (%)") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS8nConf, fig.dim= c(6, 4)}
+FDI_rows_confidential_sum8 <- FDI_rows_confidential_sum %>% filter(CSfleet=='CS8_Demersal_trawl')
+
+ggplot(FDI_rows_confidential_sum8, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum8, aes(x = Year, y = n_rows, fill = confidential)) +
+  geom_col() +
+  facet_wrap(~ Country) +
+  labs(title = paste("Number of rows confidential stacked bar chart"), x = "Year", y = "Number of rows") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(FDI_rows_confidential_sum8, aes(x = Year, y = Country, fill = n_rows)) +
+  geom_tile() +
+  facet_wrap(~ confidential) +
+  scale_fill_viridis_c() +
+  labs(title = paste("Number of rows confidential heatmap"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+
+ggplot(FDI_rows_confidential_sum8, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+  geom_point(alpha = 0.7) +
+   labs(title = paste("Number of rows confidential bubble chart"), x = "Year/Confidential", y = "Country") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
 ```
 
 ### Vessel length
@@ -2635,6 +5318,15 @@ ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=Vessel.Length.Cat
   geom_bar(stat = "identity") +
   scale_fill_manual(values = vessel_length_colors) +
   labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = Vessel.Length.Category)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU", x = "Year", y = "Fishing days (%)"
+  ) +
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
 
@@ -2692,6 +5384,92 @@ ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Vessel.Length.C
 
 ```
 
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDVLG, fig.dim= c(6, 4)}
+CS_VL_EU <- effort_EU2 %>% filter(CSfleet=='CS8_Demersal_trawl') %>% group_by(Year, VL_GR) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill=VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = paste("FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+ggplot(CS_VL_EU, aes(x = factor(Year), y = FishingDaysEU, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +   # 100% stacked bar
+  scale_y_continuous(labels = scales::percent) +     # show y-axis in %
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU", x = "Year", y = "Fishing days (%)"
+  ) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+CS_VL_MS <- effort_MS2 %>% filter(CSfleet=='CS8_Demersal_trawl') %>% group_by(Year, Country, VL_GR) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea by Country and Vessel Length",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_VL_MS, aes(x = factor(Year), y = FishingDaysMS, fill = VL_GR)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = vessel_length_colors_reduced) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS8 Demersal trawl fisheries in Greater North Sea) – % Fishing days by Vessel Length",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Vessel Length"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
 
 ### Metier level 6
 
@@ -2812,6 +5590,166 @@ ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = Metier)) +
   )
 
 ```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDMet5, fig.dim= c(6, 4)}
+CS_Metier_EU <- effort_EU2 %>% filter(CSfleet=='CS8_Demersal_trawl') %>% group_by(Year, metier_lvl5) %>%
+  summarise(FishingDaysEU=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiers <- CS_Metier_EU %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysEU)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_EU <- CS_Metier_EU %>%
+  mutate(metier_lvl5 = ifelse(metier_lvl5 %in% top_metiers, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiers
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_EU, aes(x = factor(Year), y = FishingDaysEU, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  labs(title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea EU (Top 10 Metier level 5)", 
+       x = "Year", y = "Fishing days", fill = "Top 10 metier level 5") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+#by MS
+CS_Metier_MS <- effort_MS2 %>% filter(CSfleet=='CS8_Demersal_trawl') %>% group_by(Year, Country, metier_lvl5) %>%
+  summarise(FishingDaysMS=sum(Total.Fishing.Days), na.rm=T)
+
+# Find top 10 Metiers by total fishing days
+top_metiersMS <- CS_Metier_MS %>%
+  group_by(metier_lvl5) %>%
+  summarise(Total = sum(FishingDaysMS)) %>%
+  top_n(10, Total) %>%
+  pull(metier_lvl5)
+
+# Relabel others as "Other"
+CS_Metier_MS <- CS_Metier_MS %>%
+  mutate(Metier = ifelse(metier_lvl5 %in% top_metiersMS, metier_lvl5, "Other"))
+
+# Define color vector
+metier_colors <- setNames(
+  RColorBrewer::brewer.pal(10, "Set3"),  # 10 distinct colors
+  top_metiersMS
+)
+metier_colors["Other"] <- "#B0B0B0"  # Light grey for 'Other'
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_y") +
+  labs(
+    title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "FDI fleet effort - CS8 Demersal trawl fisheries in Greater North Sea by Country and Metier level 5",
+    x = "Year",
+    y = "Fishing days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+ggplot(CS_Metier_MS, aes(x = factor(Year), y = FishingDaysMS, fill = metier_lvl5)) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_fill_manual(values = metier_colors) +
+  facet_wrap(~ Country, scales = "free_x") +
+  scale_y_continuous(labels = scales::percent) +
+  labs(
+    title = "FDI fleet effort (CS8 Demersal trawl fisheries in Greater North Sea) – % Fishing days by Metier level 5",
+    x = "Year",
+    y = "% Fishing Days",
+    fill = "Top 10 metier level 5"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1),
+    strip.text = element_text(face = "bold")
+  )
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS8FDQ, fig.dim= c(6, 4)}
+CS_Quarter_EU <- effort_EU2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%  group_by(Year, Quarter) %>%
+  summarise(FishingDaysEU = sum(Total.Fishing.Days, na.rm = TRUE), .groups = "drop")
+
+# Plot: quarterly patterns by year
+ggplot(CS_Quarter_EU, aes(x = factor(Quarter), y = FishingDaysEU, 
+                          group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  labs(
+    title = "Quarterly FDI fishing effort (CS8 Demersal trawl fisheries in Greater North Sea)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+#by MS
+CS_Quarter_MS <- effort_MS2 %>% filter(CSfleet=='CS8_Demersal_trawl') %>% group_by(Year, Country, Quarter) %>%
+  summarise(FishingDaysMS = sum(Total.Fishing.Days, na.rm =TRUE), .groups = "drop")
+
+ggplot(CS_Quarter_MS, aes(x = factor(Quarter), y = FishingDaysMS, group = Year, color = factor(Year))) +
+  geom_line(size = 1) +
+  geom_point(size = 2) +
+  facet_wrap(~ Country) +
+  labs(
+    title = "Quarterly fishing effort by country (CS8 Demersal trawl fisheries in Greater North Sea)",
+    x = "Quarter",
+    y = "Fishing days",
+    color = "Year"
+  ) +
+  theme_minimal()
+
+```
+
 
 ### Maps
 
