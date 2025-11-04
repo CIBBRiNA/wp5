@@ -1,0 +1,3225 @@
+
+```{r title, include = FALSE}
+front_title <- "DRAFT - FDI effort data CIBBRiNA"
+```
+
+<!-- The output directory below defines the path the html file will be saved at -->
+
+---
+title: `r front_title`
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_file = paste0(substr(inputFile,1,nchar(inputFile)-4),".html"), 
+  output_dir = "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/html")})
+output:
+  html_document
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(scipen=999)
+```
+
+
+```{r libraries}
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(sf)
+library(ggforce)
+library(RColorBrewer)
+```
+
+
+```{r functions, include=FALSE}
+# Funktion til at forberede effort-data
+prepare_effort_data <- function(df, metier_col, subregion_col, vessel_col) {
+  df$area <- tolower(df[[subregion_col]])
+  df$gear_lvl4 <- substr(df[[metier_col]], 1, 3)
+  df$metier_lvl5 <- substr(df[[metier_col]], 1, 7)
+  df$VL_GR <- df[[vessel_col]]
+  df$VL_GR[df$VL_GR %in% c("VL0006", "VL0008", "VL0010", "VL0612", "VL0812", "VL1012")] <- "VL0012"
+  return(df)
+}
+
+
+define_case_study <- function(df, gear, area = NULL, country = NULL, deep = NULL, cs_name) {
+  condition <- df$gear_lvl4 %in% gear
+  if (!is.null(area)) condition <- condition & df$area %in% area & df$area !='bsa'
+  if (!is.null(country)) condition <- condition & df$Country %in% country
+  if (!is.null(deep)) {
+    if (deep == "not_na") condition <- condition & !is.na(df$Deep)
+    if (deep == "is_na") condition <- condition & is.na(df$Deep)
+  }
+  df$CSfleet[condition] <- cs_name
+  return(df)
+}
+
+
+selected_vars <- c(
+  "Country", "Year", "Quarter", "area", "Gear.Type", "Mesh.size.range", "Metier",
+  "metier_lvl5", "gear_lvl4", "Vessel.Length.Category", "VL_GR",
+  "Total.days.at.sea", "Total.Fishing.Days", "Total.kW.days.at.Sea",
+  "Total.GT.days.at.sea", "Total.kW.fishing.days", "Total.GT.fishing.days",
+  "Hours.at.Sea", "kW.hours.at.sea", "GT.hours.at.sea", "CSfleet"
+)
+
+clean_C_values <- function(df, cols) {
+  for (col in cols) {
+    df[[col]][df[[col]] == "C"] <- 0
+    df[[col]] <- as.numeric(df[[col]])
+  }
+  return(df)
+}
+
+summarize_effort <- function(df, group_vars, prefix) {
+  df %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarize(
+      !!paste0("SeaDays", prefix) := sum(Total.days.at.sea, na.rm = TRUE),
+      !!paste0("FishingDays", prefix) := sum(Total.Fishing.Days, na.rm = TRUE),
+      !!paste0("kWSeaDays", prefix) := sum(Total.kW.days.at.Sea, na.rm = TRUE),
+      !!paste0("kWFishDays", prefix) := sum(Total.kW.fishing.days, na.rm = TRUE),
+      .groups = "drop"
+    )
+}
+
+# Function to filter, merge and write shapefiles
+write_effort_shapefile <- function(df, fleet_name, year_value, spatial_df, spatial_key, output_path_prefix, suffix, year_col = "Year") {
+  df <- df %>% filter(.data[[year_col]] == year_value, CSfleet == fleet_name)
+  merged <- merge(df, spatial_df, by = spatial_key, all.x = TRUE)
+  output_path <- file.path(output_path_prefix, paste0("FDI_", suffix, "_", fleet_name, "_", year_value, ".shp"))
+  st_write(merged, output_path, delete_dsn = TRUE, quiet = TRUE)
+}
+
+
+plot_fleet_index_var <- function(df, fleet_name, varname, base_year = 2013, title_prefix = "") {
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  # Hent basisværdi for indeks
+  base_value <- df_filtered %>% filter(Year == base_year) %>% pull(.data[[varname]])
+  
+  # Beregn indeks
+  df_filtered <- df_filtered %>%
+    mutate(Index = .data[[varname]] / base_value * 100)
+  
+  # Skaler indeks til samme skala som primær y-akse
+  scale_factor <- max(df_filtered[[varname]], na.rm = TRUE) / max(df_filtered$Index, na.rm = TRUE)
+  
+  ggplot(df_filtered, aes(x = factor(Year))) +
+    geom_bar(aes(y = .data[[varname]]), stat = "identity", fill = "steelblue") +
+    geom_line(aes(y = Index * scale_factor, group = 1), color = "red", size = 1) +
+    geom_point(aes(y = Index * scale_factor), color = "red", size = 2) +
+    scale_y_continuous(
+      name = varname,
+      sec.axis = sec_axis(~ . * max(df_filtered$Index, na.rm = TRUE) / max(df_filtered[[varname]], na.rm = TRUE),
+                          name = paste0("Index (", base_year, " = 100)"))
+    ) +
+    labs(title = paste("FDI effort -", title_prefix, fleet_name),
+         x = "Year", y = varname) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+}
+
+
+plot_fleet_MS_var <- function(df, fleet_name, varname, title_prefix = "") {
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  p1 <- ggplot(df_filtered, aes(x = factor(Year), y = .data[[varname]], fill = Country)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = country_colors) +
+    labs(title = paste("2.", title_prefix, fleet_name, "EU MS"),
+         x = "Year", y = varname) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  p2 <- ggplot(df_filtered, aes(x = factor(Year), y = .data[[varname]], fill = Country)) +
+    geom_bar(stat = "identity", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_manual(values = country_colors) +
+    labs(title = paste("3.", title_prefix, fleet_name, "EU MS"),
+         x = "Year", y = paste(varname, "(%)")) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  list(p1, p2)
+}
+
+
+plot_fleet_MS_tot_var <- function(df, fleet_name, varname, title_prefix = "") {
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  p1 <- ggplot(df_filtered, aes(x = factor(Year), y = .data[[varname]], fill = Country)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = country_colors) +
+    labs(title = paste("4.", title_prefix, fleet_name, "EU MS"),
+         x = "Year", y = varname) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  p2 <- ggplot(df_filtered, aes(x = factor(Year), y = .data[[varname]], fill = Country)) +
+    geom_bar(stat = "identity", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_manual(values = country_colors) +
+    labs(title = paste("5.", title_prefix, fleet_name, "EU MS"),
+         x = "Year", y = paste(varname, "(%)")) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  list(p1, p2)
+}
+
+plot_confidential <- function(df, fleet_name, chart_type = "bar", title_prefix = "") {
+  # Filter for the selected fleet
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  # Switch between chart types
+  p <- switch(chart_type,
+    "bar" = ggplot(df_filtered, aes(x = Year, y = n_rows, fill = confidential)) +
+      geom_col(position = "dodge") +
+      facet_wrap(~ Country) +
+      labs(title = paste(title_prefix, "Confidential Bar Chart"), x = "Year", y = "Number of rows"),
+    
+    "stacked" = ggplot(df_filtered, aes(x = Year, y = n_rows, fill = confidential)) +
+      geom_col() +
+      facet_wrap(~ Country) +
+      labs(title = paste(title_prefix, "Confidential Stacked Bar Chart"), x = "Year", y = "Number of rows"),
+    
+    "bubble" = ggplot(df_filtered, aes(x = Year, y = Country, size = n_rows, color = confidential)) +
+      geom_point(shape = 21, fill = NA, stroke = 1, alpha = 0.7) +
+      labs(title = paste(title_prefix, "Confidential Bubble Chart"), x = "Year", y = "Country")
+  )
+  
+  # Common theme
+  p + theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+}
+
+plot_fleet_by_length <- function(df, fleet_name, group_var, varname, title_prefix = "", facet_by_country = FALSE) {
+  df_filtered <- df %>%
+    filter(CSfleet == fleet_name)
+  
+  # Dynamic grouping
+  if (facet_by_country) {
+    df_filtered <- df_filtered %>%
+      group_by(Year, Country, !!sym(group_var)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  } else {
+    df_filtered <- df_filtered %>%
+      group_by(Year, !!sym(group_var)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  }
+  
+  # Base aesthetics
+  base_aes <- aes(x = factor(Year), y = value, fill = .data[[group_var]])
+  
+  # Plot 1: Bar chart
+  p1 <- ggplot(df_filtered, base_aes) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = vessel_length_colors) +
+    labs(title = paste("FDI fleet effort -", fleet_name, title_prefix),
+         x = "Year", y = varname, fill = group_var) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  if (facet_by_country) p1 <- p1 + facet_wrap(~ Country, scales = "free_y")
+  
+  # Plot 2: 100% stacked bar
+  p2 <- ggplot(df_filtered, base_aes) +
+    geom_bar(stat = "identity", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_manual(values = vessel_length_colors) +
+    labs(title = paste("FDI fleet effort (%) -", fleet_name, title_prefix),
+         x = "Year", y = paste(varname, "(%)"), fill = group_var) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+  
+  if (facet_by_country) p2 <- p2 + facet_wrap(~ Country, scales = "free_x")
+  
+  list(p1, p2)
+}
+
+plot_fleet_by_metier <- function(df, fleet_name, metier_col, varname, title_prefix = "", facet_by_country = FALSE, top_n = 10, metier_colors = NULL) {
+  # Filter by fleet
+  df_filtered <- df %>%
+    filter(CSfleet == fleet_name)
+
+  # Aggregate data
+  if (facet_by_country) {
+    df_filtered <- df_filtered %>%
+      group_by(Year, Country, !!sym(metier_col)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  } else {
+    df_filtered <- df_filtered %>%
+      group_by(Year, !!sym(metier_col)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  }
+
+  # Identify top N metiers
+  top_metiers <- df_filtered %>%
+    group_by(!!sym(metier_col)) %>%
+    summarise(total = sum(value), .groups = "drop") %>%
+    slice_max(total, n = top_n) %>%
+    pull(!!sym(metier_col))
+
+  # Relabel others
+  df_filtered <- df_filtered %>%
+    mutate(!!sym(metier_col) := ifelse(.data[[metier_col]] %in% top_metiers, .data[[metier_col]], "Other"))
+
+  # Set colors
+  if (is.null(metier_colors)) {
+    metier_colors <- setNames(RColorBrewer::brewer.pal(top_n, "Set3"), top_metiers)
+    metier_colors["Other"] <- "#B0B0B0"
+  } else {
+    # Ensure "Other" is included
+    if (!"Other" %in% names(metier_colors)) {
+      metier_colors["Other"] <- "#B0B0B0"
+    }
+  }
+
+  # Base aesthetics
+  base_aes <- aes(x = factor(Year), y = value, fill = .data[[metier_col]])
+
+  # Plot 1: Bar chart
+  p1 <- ggplot(df_filtered, base_aes) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = metier_colors) +
+    labs(title = paste("FDI fleet effort -", fleet_name, title_prefix),
+         x = "Year", y = varname, fill = "Top Metiers") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+  if (facet_by_country) p1 <- p1 + facet_wrap(~ Country, scales = "free_y")
+
+  # Plot 2: 100% stacked bar
+  p2 <- ggplot(df_filtered, base_aes) +
+    geom_bar(stat = "identity", position = "fill") +
+    scale_y_continuous(labels = scales::percent) +
+    scale_fill_manual(values = metier_colors) +
+    labs(title = paste("FDI fleet effort (%) -", fleet_name, title_prefix),
+         x = "Year", y = paste(varname, "(%)"), fill = "Top Metiers") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+  if (facet_by_country) p2 <- p2 + facet_wrap(~ Country, scales = "free_x")
+
+  return(list(p1, p2))
+}
+
+plot_quarterly_effort <- function(df, fleet_name, varname, title_prefix = "", facet_by_country = FALSE) {
+  # Filter and aggregate
+  df_filtered <- df %>%
+    filter(CSfleet == fleet_name)
+  
+  if (facet_by_country) {
+    df_filtered <- df_filtered %>%
+      group_by(Year, Country, Quarter) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  } else {
+    df_filtered <- df_filtered %>%
+      group_by(Year, Quarter) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  }
+  
+  # Base plot
+  p <- ggplot(df_filtered, aes(x = factor(Quarter), y = value, group = Year, color = factor(Year))) +
+    geom_line(size = 1) +
+    geom_point(size = 2) +
+    labs(
+      title = paste("Quarterly fishing effort -", fleet_name, title_prefix),
+      x = "Quarter",
+      y = varname,
+      color = "Year"
+    ) +
+    theme_minimal()
+  
+  if (facet_by_country) p <- p + facet_wrap(~ Country)
+  
+  return(p)
+}
+
+plot_area_effort <- function(df, fleet_name, varname = "Total.Fishing.Days",
+                             group_var = NULL, top_n = 10, title_prefix = "") {
+  
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  if (nrow(df_filtered) == 0) {
+    warning(paste("No data available for fleet:", fleet_name))
+    return(NULL)
+  }
+  
+  if (!"area" %in% colnames(df_filtered) || all(is.na(df_filtered$area))) {
+    warning("Missing or invalid 'area' column in filtered data.")
+    return(NULL)
+  }
+  
+  if (!is.null(group_var)) {
+    if (!group_var %in% colnames(df_filtered)) {
+      warning(paste("Grouping variable", group_var, "not found in data."))
+      return(NULL)
+    }
+    
+    df_filtered <- df_filtered %>%
+      group_by(Year, area, !!sym(group_var)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  } else {
+    df_filtered <- df_filtered %>%
+      group_by(Year, area) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  }
+  
+  if (!is.null(group_var) && grepl("Metier", group_var)) {
+    top_groups <- df_filtered %>%
+      group_by(!!sym(group_var)) %>%
+      summarise(total = sum(value), .groups = "drop") %>%
+      slice_max(total, n = top_n) %>%
+      pull(!!sym(group_var))
+    
+    df_filtered <- df_filtered %>%
+      mutate(!!sym(group_var) := ifelse(.data[[group_var]] %in% top_groups, .data[[group_var]], "Other"))
+    
+    colors <- setNames(RColorBrewer::brewer.pal(top_n, "Set3"), top_groups)
+    colors["Other"] <- "#B0B0B0"
+  } else {
+    colors <- vessel_length_colors
+  }
+  
+  base_aes <- aes(x = factor(Year), y = value, fill = if (!is.null(group_var)) .data[[group_var]] else area)
+  
+  # Plot 1
+  
+p1 <- ggplot(df_filtered, base_aes) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = colors) +
+  scale_x_discrete(breaks = function(x) x[seq(1, length(x), by = 2)]) +
+  facet_wrap(~ area, scales = "free_y") +
+  labs(title = paste("FDI fleet effort -", fleet_name, title_prefix),
+       x = "Year", y = varname, fill = ifelse(is.null(group_var), "Area", group_var)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    legend.key.size = unit(0.5, "lines")
+  )
+
+  
+  # Plot 2
+  
+p2 <- ggplot(df_filtered, base_aes) +
+  geom_bar(stat = "identity", position = "fill") +
+  scale_y_continuous(labels = scales::percent) +
+  scale_fill_manual(values = colors) +
+  scale_x_discrete(breaks = function(x) x[seq(1, length(x), by = 2)]) +
+  facet_wrap(~ area, scales = "free_x") +
+  labs(title = paste("FDI fleet effort (%) -", fleet_name, title_prefix),
+       x = "Year", y = paste(varname, "(%)"), fill = ifelse(is.null(group_var), "Area", group_var)) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    legend.text = element_text(size = 8),
+    legend.title = element_text(size = 9),
+    legend.key.size = unit(0.5, "lines")
+  )
+
+  list(p1, p2)
+}
+
+plot_area_effort_paginated <- function(df, fleet_name, varname = "Total.Fishing.Days",
+                                       group_var = NULL, top_n = 10, title_prefix = "",
+                                       ncol = 3, nrow = 3) {
+  
+  # Filter data
+  df_filtered <- df %>% filter(CSfleet == fleet_name)
+  
+  if (nrow(df_filtered) == 0) {
+    warning(paste("No data available for fleet:", fleet_name))
+    return(NULL)
+  }
+  
+  if (!"area" %in% colnames(df_filtered) || all(is.na(df_filtered$area))) {
+    warning("Missing or invalid 'area' column in filtered data.")
+    return(NULL)
+  }
+  
+  # Group and summarise
+  if (!is.null(group_var)) {
+    if (!group_var %in% colnames(df_filtered)) {
+      warning(paste("Grouping variable", group_var, "not found in data."))
+      return(NULL)
+    }
+    
+    df_filtered <- df_filtered %>%
+      group_by(Year, area, !!sym(group_var)) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  } else {
+    df_filtered <- df_filtered %>%
+      group_by(Year, area) %>%
+      summarise(value = sum(.data[[varname]], na.rm = TRUE), .groups = "drop")
+  }
+  
+  # Handle colors
+  if (!is.null(group_var) && grepl("Metier", group_var)) {
+    top_groups <- df_filtered %>%
+      group_by(!!sym(group_var)) %>%
+      summarise(total = sum(value), .groups = "drop") %>%
+      slice_max(total, n = top_n) %>%
+      pull(!!sym(group_var))
+    
+    df_filtered <- df_filtered %>%
+      mutate(!!sym(group_var) := ifelse(.data[[group_var]] %in% top_groups, .data[[group_var]], "Other"))
+    
+    colors <- setNames(RColorBrewer::brewer.pal(top_n, "Set3"), top_groups)
+    colors["Other"] <- "#B0B0B0"
+  } else {
+    colors <- vessel_length_colors
+  }
+  
+  base_aes <- aes(x = factor(Year), y = value, fill = if (!is.null(group_var)) .data[[group_var]] else area)
+  
+  # Calculate number of pages
+  n_pages <- ceiling(length(unique(df_filtered$area)) / (ncol * nrow))
+  
+  # Generate paginated plots
+  plots <- list()
+  for (i in 1:n_pages) {
+    p <- ggplot(df_filtered, base_aes) +
+      geom_bar(stat = "identity") +
+      scale_fill_manual(values = colors) +
+      scale_x_discrete(breaks = function(x) x[seq(1, length(x), by = 2)]) +
+      facet_wrap_paginate(~ area, scales = "free_y", ncol = ncol, nrow = nrow, page = i) +
+      labs(title = paste("FDI fleet effort -", fleet_name, title_prefix, "(Page", i, "of", n_pages, ")"),
+           x = "Year", y = varname, fill = ifelse(is.null(group_var), "Area", group_var)) +
+      theme_minimal() +
+      theme(
+        plot.title = element_text(size = 10, face = "bold"),  # Reduce title size
+        axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+        legend.text = element_text(size = 8),
+        legend.title = element_text(size = 9),
+        legend.key.size = unit(0.5, "lines")
+      )
+    plots[[i]] <- p
+  }
+    return(plots)
+  }
+  
+```
+
+
+```{r source, message = FALSE, warning = FALSE}
+datapath <- "Q:\\20-forskning\\20-dfad\\data\\Data\\FDI_data_dissemination\\2024 DC\\"
+
+# Read FDI effort data
+effort_MS <- read.csv(paste(datapath,"2024_fdi_effort\\Effort\\FDI Effort by country.csv",sep=''))
+effort_EU <- read.csv(paste(datapath,"2024_fdi_effort\\Effort\\FDI Effort EU.csv",sep=""))
+effort_rect <- read.csv(paste(datapath, "spatial_effort_tableau_pts_EU27.csv", sep=""))
+
+
+effort_MS <- prepare_effort_data(effort_MS, "Metier", "Sub.region", "Vessel.Length.Category")
+effort_EU <- prepare_effort_data(effort_EU, "Metier", "Sub.region", "Vessel.Length.Category")
+effort_rect <- prepare_effort_data(effort_rect, "metier", "sub_region", "vessel_length")
+
+#Area shapefile
+area <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Areas_20160601_cut_dense_3857.shp", quiet = TRUE)
+
+area$area <- area$Area_Full
+area <- subset(area, select=c(area, geometry))
+area$area[area$area %in% c("27.10.a.1", "27.10.a.2")] <- "27.10.a"
+area$area[area$area %in% c("27.5.a.1", "27.5.a.2")] <- "27.5.a"
+area$area[area$area %in% c("27.6.b.1", "27.6.b.2")] <- "27.6.b"
+area$area[area$area %in% c("27.7.c.1", "27.7.c.2")] <- "27.7.c"
+
+area2 <- area %>%
+  group_by(area) %>%
+  summarise(geometry = st_union(geometry), .groups = "drop") %>%
+  st_as_sf()
+
+#Rectangle shapefile
+rect <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Statistical_Rectangles_Eco.shp", quiet = TRUE)
+
+rect$icesname <- rect$ICESNAME
+rect <- subset(rect, select=c(icesname, geometry))
+
+```
+
+## FDI effort data for CIBBRiNA
+
+Public data from EU STECF Fisheries Dependent Information data call are downloaded from: https://stecf.ec.europa.eu/data-dissemination/fdi_en
+
+Data are filtered to match the CIBBRiNA case studies. Only case studies where it makes sense to extract from FDI are included:
+
+The fleet definitions should be validated by CS leads that the selection based on “country*gear*area*(deep)” is appropriate and relevant for their case study. Some may need a more precise selection — for example, by using DCF Métiers at Level 5 or 6, or by including vessel length ranges.
+
+ * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany. Norway and Iceland does not report to the EU FDI data call
+ * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
+ * Case study 3: UK static nets - UK data only available until 2020.
+ * Case study 4: Deepwater longlines in Portuguese waters - Portugal - deepwater indicator DEEP
+ * Case study 5: Surface longlines in Madeira waters  - included. Longlines in area 34.1.2
+ * Case study 6: UK longlines - UK data only available until 2020.
+ * Case study 7: Pelagic trawl fisheries - included
+ * Case study 8: Demersal trawl fisheries in Greater North Sea - Belgium and the Netherlands
+
+
+```{r fleets}
+# Initialiser CSfleet
+effort_MS_conf <- effort_MS
+
+for (df_name in c("effort_MS", "effort_EU", "effort_rect", "effort_MS_conf")) {
+  assign(df_name, within(get(df_name), CSfleet <- ""))
+}
+
+# Definer case studies
+gear_gillnet <- c("GNC","GND","GNS","GTR","GTN")
+gear_longline <- c("LHM","LHP","LLD","LLS", "LNB","LTL")
+gear_pelagic <- c("OTM","PTM")
+gear_demersal <- c("OTB","PTB","TBB")
+
+area_CS1 <- c("27.5.a","27.4.a","27.4.b","27.4.c","27.3.a.20","27.3.a.21","27.3.b.23","27.3.c.22","27.3.d.24","27.3.d.25","27.3.d.26")
+area_CS2 <- c("27.8.c","27.9.a")
+area_CS4 <- c("34.1.2","27.10.a","27.9.a")
+area_CS5 <- c("34.1.2")
+area_CS6 <- c("27.6.a","27.7.b","27.7.j","27.4.a")
+area_CS7 <- c("27.4.a","27.4.b","27.4.c","27.6.a","27.6.b","27.7.a","27.7.b","27.7.c","27.7.d","27.7.e","27.7.f","27.7.g","27.7.h","27.7.j","27.7.k","27.8.a")
+area_CS8 <- c("27.3.a.20","27.4.b","27.4.c","27.7.d")
+
+# Apply case studies
+effort_EU <- define_case_study(effort_EU, gear_gillnet, area_CS1, cs_name = "CS1_Gillnet_North")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_gillnet, area_CS1, cs_name = "CS1_Gillnet_North")
+effort_MS <- define_case_study(effort_MS, gear_gillnet, area_CS1, country = c("Denmark","Sweden","Poland","Germany"), cs_name = "CS1_Gillnet_North")
+effort_rect <- define_case_study(effort_rect, gear_gillnet, area_CS1, cs_name = "CS1_Gillnet_North")
+
+effort_EU <- define_case_study(effort_EU, gear_gillnet, area_CS2, cs_name = "CS2_Gillnet_South")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_gillnet, area_CS2, cs_name = "CS2_Gillnet_South")
+effort_MS <- define_case_study(effort_MS, gear_gillnet, area_CS2, country = "Spain", cs_name = "CS2_Gillnet_South")
+effort_rect <- define_case_study(effort_rect, gear_gillnet, area_CS2, cs_name = "CS2_Gillnet_South")
+
+effort_MS <- define_case_study(effort_MS, gear_gillnet, country = "United Kingdom", cs_name = "CS3_Gillnet_UK")
+
+effort_MS <- define_case_study(effort_MS, gear_longline, area_CS4, country = "Portugal", deep = "not_na", cs_name = "CS4_Longlines_DEEP_PRT")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_longline, area_CS4, deep = "not_na", cs_name = "CS4_Longlines_DEEP_PRT")
+effort_EU <- define_case_study(effort_EU, gear_longline, area_CS4, deep = "not_na", cs_name = "CS4_Longlines_DEEP_PRT")
+effort_rect <- define_case_study(effort_rect, gear_longline, area_CS4, deep = "not_na", cs_name = "CS4_Longlines_DEEP_PRT")
+
+effort_MS <- define_case_study(effort_MS, gear_longline, area_CS5, country = "Portugal", deep = "is_na", cs_name = "CS5_Surface_Longlines_Madeira")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_longline, area_CS5, deep = "is_na", cs_name = "CS5_Surface_Longlines_Madeira")
+effort_EU <- define_case_study(effort_EU, gear_longline, area_CS5, deep = "is_na", cs_name = "CS5_Surface_Longlines_Madeira")
+
+effort_MS <- define_case_study(effort_MS, gear_longline, area_CS6, country = "United Kingdom", cs_name = "CS6_Longlines_UK")
+
+effort_MS <- define_case_study(effort_MS, gear_pelagic, area_CS7, country = c("United Kingdom","Denmark","Ireland","Netherlands"), cs_name = "CS7_Pelagic_trawl")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_pelagic, area_CS7, cs_name = "CS7_Pelagic_trawl")
+effort_EU <- define_case_study(effort_EU, gear_pelagic, area_CS7, cs_name = "CS7_Pelagic_trawl")
+effort_rect <- define_case_study(effort_rect, gear_pelagic, area_CS7, cs_name = "CS7_Pelagic_trawl")
+
+effort_MS <- define_case_study(effort_MS, gear_demersal, area_CS8, country = c("Belgium","Netherlands"), cs_name = "CS8_Demersal_trawl")
+effort_MS_conf <- define_case_study(effort_MS_conf, gear_demersal, area_CS8, cs_name = "CS8_Demersal_trawl")
+effort_EU <- define_case_study(effort_EU, gear_demersal, area_CS8, cs_name = "CS8_Demersal_trawl")
+effort_rect <- define_case_study(effort_rect, gear_demersal, area_CS8, cs_name = "CS8_Demersal_trawl")
+
+# Filtrér datasæt
+effort_EU1 <- effort_EU %>% filter(CSfleet != "")
+effort_MS1 <- effort_MS %>% filter(CSfleet != "")
+effort_MS_conf1 <- effort_MS_conf %>% filter(CSfleet != "")
+effort_rect1 <- effort_rect %>% filter(CSfleet != "")
+
+```
+
+```{r Data}
+
+effort_EU2 <- effort_EU1[selected_vars]
+effort_MS2 <- effort_MS1[selected_vars]
+
+cols_to_clean <- c("Total.days.at.sea", "Total.Fishing.Days", "Total.kW.days.at.Sea", "Total.kW.fishing.days")
+effort_MS2 <- clean_C_values(effort_MS2, cols_to_clean)
+effort_MS2$Year <- as.character(effort_MS2$Year)
+
+# --- Summarizing ---
+FDI_fleet_EU <- summarize_effort(effort_EU2, c("CSfleet", "Year"), "EU")
+FDI_fleet_MS <- summarize_effort(effort_MS2, c("CSfleet", "Country", "Year"), "MS")
+FDI_fleet_MS_tot <- summarize_effort(effort_MS2, c("CSfleet", "Year"), "MS")
+
+FDI_fleet_EU <- FDI_fleet_EU %>% mutate(Year = as.character(Year))
+FDI_fleet_MS_tot <- FDI_fleet_MS_tot %>% mutate(Year = as.character(Year))
+
+# --- Calculate confidential values ---
+FDI_fleet_join <- FDI_fleet_EU %>%
+  inner_join(FDI_fleet_MS_tot, by = c("CSfleet", "Year")) %>%
+  mutate(
+    FishingDaysConfidential = FishingDaysEU - FishingDaysMS,
+    SeaDaysConfidential = SeaDaysEU - SeaDaysMS,
+    kWSeaDaysConfidential = kWSeaDaysEU - kWSeaDaysMS,
+    kWFishDaysConfidential = kWFishDaysEU - kWFishDaysMS
+  )
+
+FDI_fleet_confidential <- FDI_fleet_join %>%
+  select(CSfleet, Year, FishingDaysConfidential, SeaDaysConfidential, kWSeaDaysConfidential, kWFishDaysConfidential) %>%
+  mutate(
+    Country = "Unknown",
+    SeaDaysMS = SeaDaysConfidential,
+    FishingDaysMS = FishingDaysConfidential,
+    kWSeaDaysMS = kWSeaDaysConfidential,
+    kWFishDaysMS = kWFishDaysConfidential
+  ) %>%
+  select(CSfleet, Country, Year, SeaDaysMS, FishingDaysMS, kWSeaDaysMS, kWFishDaysMS)
+
+FDI_fleet_confidential$Year <- as.character(FDI_fleet_confidential$Year)
+FDI_fleet_MS_tot <- rbind(FDI_fleet_MS, FDI_fleet_confidential)
+
+# --- Confidential rows ---
+FDI_rows_confidential <- effort_MS_conf1 %>%
+  mutate(
+    confidential = ifelse(Total.Fishing.Days == "C", "Y", "N"),
+    n_rows = 1,
+    Year = as.character(Year)
+  ) %>%
+  group_by(CSfleet, Country, Year, confidential) %>%
+  summarize(n_rows = sum(n_rows, na.rm = TRUE), .groups = "drop")
+
+# --- colour schemes ---
+country_colors <- c(
+  "Sweden" = "#1f77b4", "Germany" = "#ff7f0e", "Poland" = "#2ca02c", "Denmark" = "#d62728",
+  "Spain" = "#9467bd", "United Kingdom" = "#8c564b", "Portugal" = "#e377c2",
+  "Netherlands" = "#7f7f7f", "Ireland" = "#bcbd22", "Belgium" = "#17becf", "Unknown" = "#cccccc"
+)
+
+vessel_length_colors <- c(
+  "NK" = "#d9d9d9", "VL0008" = "#c6dbef", "VL0010" = "#9ecae1", "VL0612" = "#6baed6",
+  "VL0812" = "#4292c6", "VL1012" = "#2171b5", "VL0012" = "#4292c6", "VL1218" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+vessel_length_colors_reduced <- c(
+  "NK" = "#d9d9d9", "VL0012" = "#4292c6", "VL1218" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+```
+
+
+```{r Spatial, message = FALSE, warning = FALSE}
+# Aggregate effort-data by EU area
+FDI_area <- effort_EU2 %>%
+  group_by(CSfleet, Year, area) %>%
+  summarize(
+    SeaDays = sum(Total.days.at.sea, na.rm = TRUE),
+    FishingDays = sum(Total.Fishing.Days, na.rm = TRUE),
+    kWSeaDays = sum(Total.kW.days.at.Sea, na.rm = TRUE),
+    kWFishDays = sum(Total.kW.fishing.days, na.rm = TRUE),
+    .groups = "drop"
+  )
+
+# Aggregate effort-data by rectangles
+effort_rect2 <- effort_rect1 %>%
+  group_by(CSfleet, year, icesname) %>%
+  summarize(fishDays = sum(totfishdays, na.rm = TRUE), .groups = "drop")
+
+# List relevant CS-fleets and output-path
+csfleets <- c("CS1_Gillnet_North", "CS2_Gillnet_South", "CS4_Longlines_DEEP_PRT", "CS7_Pelagic_trawl", "CS8_Demersal_trawl")
+year_target <- 2023
+output_dir <- "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/shp"
+
+# Loop: EU area shapefiles
+for (fleet in csfleets) {
+  write_effort_shapefile(FDI_area, fleet, year_target, area, "area", output_dir, "area", year_col = "Year")
+}
+
+# Loop: Rectangle shapefiles
+for (fleet in csfleets) {
+  write_effort_shapefile(effort_rect2, fleet, year_target, rect, "icesname", output_dir, "rect", year_col = "year")
+}
+
+
+
+```
+
+## CIBBRiNA Case Study 1: Northern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.5.a, 27.4.a, 27.4.b, 27.4.c, 27.3.a.20, 27.3.a.21, 27.3.b.23, 27.3.c.22, 27.3.d.24, 27.3.d.25, 27.3.d.26
+
+Countries: Sweden, Denmark, Poland, Germany (Iceland and Norway does not report to the EU FDI data call)
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS1DASYear, fig.dim= c(6, 4)}
+
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS1_Gillnet_North", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS1_Gillnet_North", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS1_Gillnet_North", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS1FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS1_Gillnet_North", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <-plot_fleet_MS_var(FDI_fleet_MS, "CS1_Gillnet_North", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+  # MS total effort incl. confidential
+plots2 <-plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS1_Gillnet_North", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS1kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS1_Gillnet_North", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS1_Gillnet_North", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS1_Gillnet_North", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+```{r CS1kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS1_Gillnet_North", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS1_Gillnet_North", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS1_Gillnet_North", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS1nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS1_Gillnet_North", chart_type = ct))
+}
+
+```
+
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+
+
+```{r CS1FDVL, fig.dim= c(6, 4)}
+
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS1_Gillnet_North", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS1_Gillnet_North", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS1_Gillnet_North", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS1_Gillnet_North", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS1_Gillnet_North", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS1_Gillnet_North", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS1_Gillnet_North", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS1_Gillnet_North", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS1FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS1_Gillnet_North") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS1_Gillnet_North", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS1_Gillnet_North", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS1FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS1_Gillnet_North", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS1_Gillnet_North", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS1A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_EU2, "CS1_Gillnet_North", title_prefix = "EU")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_EU2, "CS1_Gillnet_North", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_EU2, "CS1_Gillnet_North", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+```
+
+### Maps
+
+Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+
+```{r CS1area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS1 Northern gillnet effort, ICES areas (2023)"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS1_FDI_EU_gillnets_2023_area.png")
+
+```
+
+```{r CS1rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS1 Northern gillnet effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS1_FDI_EU_gillnets_2023_rectangle.png")
+
+```
+
+## CIBBRiNA Case Study 2: Southern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.8.c, 27.9.a
+
+Countries: Spain
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS2DASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS2_Gillnet_South", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS2_Gillnet_South", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS2_Gillnet_South", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS2FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS2_Gillnet_South", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS2_Gillnet_South", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS2_Gillnet_South", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS2kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS2_Gillnet_South", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS2_Gillnet_South", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS2_Gillnet_South", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS2kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS2_Gillnet_South", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS2_Gillnet_South", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS2_Gillnet_South", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS2nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS2_Gillnet_South", chart_type = ct))
+}
+
+```
+
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+
+
+```{r CS2FDVL, fig.dim= c(6, 4)}
+
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS2_Gillnet_South", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS2_Gillnet_South", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+
+```{r CS2FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS2_Gillnet_South", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS2_Gillnet_South", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS2FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+#metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+#metier_colors_consistent["Other"] <- "#B0B0B0"
+
+# Create a larger palette based on Set3
+palette_func <- colorRampPalette(brewer.pal(12, "Set3"))
+metier_colors_consistent <- setNames(palette_func(length(top_metiers_all)), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS2_Gillnet_South", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS2_Gillnet_South", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS2FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS2_Gillnet_South", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS2_Gillnet_South", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS2FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS2_Gillnet_South") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS2_Gillnet_South", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS2_Gillnet_South", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS2FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS2_Gillnet_South", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS2_Gillnet_South", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS2A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_EU2, "CS2_Gillnet_South", title_prefix = "EU")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_EU2, "CS2_Gillnet_South", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_EU2, "CS2_Gillnet_Sout", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+
+```
+
+### Maps
+
+Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+
+```{r CS2area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS2 Southern gillnet effort, ICES areas (2023)"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS2_FDI_EU_gillnets_2023_area.png")
+
+```
+
+```{r CS2rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS2 Southern gillnet effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS2_FDI_EU_gillnets_2023_rectangle.png")
+
+```
+
+## CIBBRiNA Case Study 3: UK static nets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Countries: United Kingdom
+
+The UK CS data are only extracted for the MS level, and are only available until 2020
+
+
+### Days at sea by year
+
+The plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+
+```{r CS3DASYear, fig.dim= c(6, 4)}
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS3_Gillnet_UK')
+
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS3 UK static nets"), x = "Year", y = "Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### Fishing days by year
+
+The plot is showing the effort as Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS3FDYear, fig.dim= c(6, 4)}
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS3_Gillnet_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS3 UK static nets"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### kW Days at sea by year
+
+The plot is showing the effort as kW Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS3kWDASYear, fig.dim= c(6, 4)}
+
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS3_Gillnet_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS3 UK static nets"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### kW Fishing days by year
+
+The plot is showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS3kWFDYear, fig.dim= c(6, 4)}
+
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS3_Gillnet_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS3 UK static nets"), x = "Year", y = "kWFishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### Vessel length
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+```{r CS3FDVL, fig.dim= c(6, 4)}
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS3_Gillnet_UK", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDVLG, fig.dim= c(6, 4)}
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS3_Gillnet_UK", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <-  effort_MS2 %>% filter(CSfleet == "CS3_Gillnet_UK") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS3_Gillnet_UK", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <-   effort_MS2 %>% filter(CSfleet == "CS3_Gillnet_UK") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS3_Gillnet_UK", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS3FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <-   effort_MS2 %>% filter(CSfleet == "CS3_Gillnet_UK") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS3_Gillnet_UK", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year. 
+
+```{r CS3FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_MS2, "CS3_Gillnet_UK", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS3A, fig.dim= c(6, 4)}
+plots_area_vl <- plot_area_effort_paginated(effort_MS2, "CS3_Gillnet_UK", group_var = "Vessel.Length.Category", title_prefix = "MS by Vessel Length", ncol = 3, nrow = 3)
+
+# Print all pages
+for (p in plots_area_vl) {
+  print(p)
+}
+
+plots_area_metier <- plot_area_effort_paginated(effort_MS2, "CS3_Gillnet_UK", group_var = "Metier", title_prefix = "MS by Metier", top_n = 10 , ncol = 3, nrow = 3)
+
+# Print all pages
+for (p in plots_area_metier) {
+  print(p)
+}
+
+```
+
+## CIBBRiNA Case Study 4: Deepwater longlines in Portuguese waters {.tabset}
+
+Gears: LHP,LLD,LLS
+
+Areas: 34.1.2,27.10.a,27.9.a
+
+Countries: Portugal
+
+Deepwater Indicator: DEEP
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS4DASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS4_Longlines_DEEP_PRT", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS4_Longlines_DEEP_PRT", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS4_Longlines_DEEP_PRT", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS4FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS4_Longlines_DEEP_PRT", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS4_Longlines_DEEP_PRT", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS4_Longlines_DEEP_PRT", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS4kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS4_Longlines_DEEP_PRT", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS4_Longlines_DEEP_PRT", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS4_Longlines_DEEP_PRT", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+```{r CS4kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS4_Longlines_DEEP_PRT", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS4_Longlines_DEEP_PRT", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS4_Longlines_DEEP_PRT", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS4nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS4_Longlines_DEEP_PRT", chart_type = ct))
+}
+
+```
+
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+
+
+```{r CS4FDVL, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS4_Longlines_DEEP_PRT", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS4_Longlines_DEEP_PRT", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+
+```{r CS4FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS4_Longlines_DEEP_PRT", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS4_Longlines_DEEP_PRT", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS4FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS4_Longlines_DEEP_PRT", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS4_Longlines_DEEP_PRT", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS4FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS4_Longlines_DEEP_PRT", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS4_Longlines_DEEP_PRT", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS4FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS4_Longlines_DEEP_PRT") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS4_Longlines_DEEP_PRT", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS4_Longlines_DEEP_PRT", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS4FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS4_Longlines_DEEP_PRT", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS4_Longlines_DEEP_PRT", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS4A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_EU2, "CS4_Longlines_DEEP_PRT", title_prefix = "EU")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_EU2, "CS4_Longlines_DEEP_PRT", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_EU2, "CS4_Longlines_DEEP_PRT", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+
+```
+
+### Maps
+
+Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+
+```{r CS4area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS4 Longlines effort, ICES areas (2023)"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS4_FDI_EU_longlines_2023_area.png")
+
+```
+
+```{r CS4rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS4 Longlines effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS4_FDI_EU_longlines_2023_rectangle.png")
+
+```
+
+## CIBBRiNA Case Study 5: Surface longlines in Madeira waters {.tabset}
+
+Gears: LHP,LLD,LLS
+
+Areas: 34.1.2
+
+Countries: Portugal
+
+Deepwater Indicator: NA
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS5DASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS5_Surface_Longlines_Madeira", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS5_Surface_Longlines_Madeira", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS5_Surface_Longlines_Madeira", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS5FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS5_Surface_Longlines_Madeira", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS5_Surface_Longlines_Madeira", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS5_Surface_Longlines_Madeira", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS5kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS5_Surface_Longlines_Madeira", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS5_Surface_Longlines_Madeira", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS5_Surface_Longlines_Madeira", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+```{r CS5kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS5_Surface_Longlines_Madeira", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS5_Surface_Longlines_Madeira", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  #print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS5_Surface_Longlines_Madeira", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS5nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS5_Surface_Longlines_Madeira", chart_type = ct))
+}
+
+```
+
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+
+```{r CS5FDVL, fig.dim= c(6, 4)}
+
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS5_Surface_Longlines_Madeira", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS5_Surface_Longlines_Madeira", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+
+```{r CS5FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS5_Surface_Longlines_Madeira", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS5_Surface_Longlines_Madeira", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS5FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS5_Surface_Longlines_Madeira", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS5_Surface_Longlines_Madeira", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS5FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS5_Surface_Longlines_Madeira", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS5_Surface_Longlines_Madeira", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS5FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS5_Surface_Longlines_Madeira") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS5_Surface_Longlines_Madeira", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS5_Surface_Longlines_Madeira", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS5FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS5_Surface_Longlines_Madeira", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS5_Surface_Longlines_Madeira", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS5A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_EU2, "CS5_Surface_Longlines_Madeira", title_prefix = "EU")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_EU2, "CS5_Surface_Longlines_Madeira", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_EU2, "CS5_Surface_Longlines_Madeira", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+
+```
+
+## CIBBRiNA Case Study 6: UK longlines {.tabset}
+
+Gears: LHM,LHP,LLD,LLS,LNB,LTL
+
+Areas: 27.6.a,27.7.b,27.7.j,27.4.a
+
+Countries: United Kingdom
+
+The UK CS data are only extracted for the MS level, and are only available until 2020
+
+
+### Days at sea by year
+
+The plot is showing the effort as Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+
+```{r CS6DASYear, fig.dim= c(6, 4)}
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS6_Longlines_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = SeaDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS6 UK longlines"), x = "Year", y = "Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### Fishing days by year
+
+The plot is showing the effort as Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS6FDYear, fig.dim= c(6, 4)}
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS6_Longlines_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = FishingDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS6 UK longlines"), x = "Year", y = "Fishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### kW Days at sea by year
+
+The plot is showing the effort as kW Days at sea by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS+kWDASYear, fig.dim= c(6, 4)}
+
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS6_Longlines_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWSeaDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS6 UK longlines"), x = "Year", y = "kW Days at sea") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### kW Fishing days by year
+
+The plot is showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries and gears. 
+
+```{r CS6kWFDYear, fig.dim= c(6, 4)}
+
+FDI_CS_fleet_MS <- FDI_fleet_MS %>% filter(CSfleet=='CS6_Longlines_UK')
+ggplot(FDI_CS_fleet_MS, aes(x = factor(Year), y = kWFishDaysMS, fill=Country)) +
+  geom_bar(stat = "identity") +
+  scale_fill_manual(values = country_colors) +
+  labs(title = paste("1. FDI fleet effort - CS6 UK longlines"), x = "Year", y = "kWFishing days") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+```
+
+### Vessel length
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+```{r CS6FDVL, fig.dim= c(6, 4)}
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS6_Longlines_UK", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+The first plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+The second plot is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDVLG, fig.dim= c(6, 4)}
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS6_Longlines_UK", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- effort_MS2 %>% filter(CSfleet == "CS6_Longlines_UK") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS6_Longlines_UK", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- effort_MS2 %>% filter(CSfleet == "CS6_Longlines_UK") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS6_Longlines_UK", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at country level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS6FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <-   effort_MS2 %>% filter(CSfleet == "CS6_Longlines_UK") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS6_Longlines_UK", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS6FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_MS2, "CS6_Longlines_UK", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS6A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_MS2, "CS6_Longlines_UK", title_prefix = "MS")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_MS2, "CS6_Longlines_UK", group_var = "Vessel.Length.Category", title_prefix = "MS by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_MS2, "CS6_Longlines_UK", group_var = "Metier", title_prefix = "MS by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+
+```
+
+## CIBBRiNA Case Study 7: Pelagic trawl fisheries {.tabset}
+
+Gears: OTM, PTM
+
+Areas: 27.4.a,27.4.b,27.4.c,27.6.a,27.6.b,27.7.a,27.7.b,27.7.c,27.7.d,27.7.e,27.7.f,27.7.g,27.7.h,27.7.j,27.7.k,27.8.a
+
+Countries: United Kingdom,Denmark,Ireland,Netherlands
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS7DASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS7_Pelagic_trawl", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS7_Pelagic_trawl", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS7_Pelagic_trawl", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS7FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS7_Pelagic_trawl", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS7_Pelagic_trawl", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots1 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS7_Pelagic_trawl", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+
+```{r CS7kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS7_Pelagic_trawl", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS7_Pelagic_trawl", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS7_Pelagic_trawl", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+```{r CS7kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS7_Pelagic_trawl", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS7_Pelagic_trawl", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS7_Pelagic_trawl", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS7nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS7_Pelagic_trawl", chart_type = ct))
+}
+
+```
+
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+
+
+```{r CS7FDVL, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS7_Pelagic_trawl", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS7_Pelagic_trawl", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS7_Pelagic_trawl", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS7_Pelagic_trawl", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+#metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+#metier_colors_consistent["Other"] <- "#B0B0B0"
+
+# Generate extended color palette
+palette_func <- colorRampPalette(brewer.pal(12, "Set3"))
+metier_colors_consistent <- setNames(palette_func(length(top_metiers_all)), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS7_Pelagic_trawl", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS7_Pelagic_trawl", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS7_Pelagic_trawl", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS7_Pelagic_trawl", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS7FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS7_Pelagic_trawl") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS7_Pelagic_trawl", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS7_Pelagic_trawl", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS7FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS7_Pelagic_trawl", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS7_Pelagic_trawl", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS7A, fig.dim= c(6, 4)}
+plots_area_vl <- plot_area_effort_paginated(effort_MS2, "CS7_Pelagic_trawl", group_var = "Vessel.Length.Category", title_prefix = "MS by Vessel Length", ncol = 3, nrow = 3)
+
+# Print all pages
+for (p in plots_area_vl) {
+  print(p)
+}
+
+plots_area_metier <- plot_area_effort_paginated(effort_MS2, "CS7_Pelagic_trawl", group_var = "Metier", title_prefix = "MS by Metier", top_n = 10 , ncol = 3, nrow = 3)
+
+# Print all pages
+for (p in plots_area_metier) {
+  print(p)
+}
+
+```
+
+### Maps
+
+Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+
+```{r CS7area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS7 Pelagic trawl effort, ICES areas (2023)"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS7_FDI_EU_pelagic_trawl_2023_area.png")
+
+```
+
+```{r CS7rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS7 Pelagic trawl effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS7_FDI_EU_pelagic_trawl_2023_rectangle.png")
+
+```
+ 
+## CIBBRiNA Case Study 8: Demersal trawl fisheries in Greater North Sea {.tabset}
+
+Gears: OTB, PTB, TBB
+
+Areas: 27.3.a.20,27.4.b,27.4.c,27.7.d
+
+Countries: Belgium,Netherlands
+
+
+### Days at sea by year
+
+The first plot is showing the effort as Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot. 
+
+Plots 4 and 5 are showing the effort as Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS8DASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS8_Demersal_trawl", "SeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS8_Demersal_trawl", "SeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS8_Demersal_trawl", "SeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### Fishing days by year
+
+
+The first plot is showing the effort as Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS8FDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS8_Demersal_trawl", "FishingDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS8_Demersal_trawl", "FishingDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS8_Demersal_trawl", "FishingDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Days at sea by year
+
+The first plot is showing the effort as kW Days at sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Days at sea by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet.
+
+
+```{r CS8kWDASYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS8_Demersal_trawl", "kWSeaDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS8_Demersal_trawl", "kWSeaDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS8_Demersal_trawl", "kWSeaDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### kW Fishing days by year
+
+The first plot is showing the effort as kW Fishing days sea by year, when filtering the effort at EU level for the CIBBRiNA case study fleets. The EU level can only be filtered by gears and areas, and not by country.
+
+Plots 2 and 3 are showing the effort as kW Fishing days by year (total and as percentage), when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. Therefore a part of the effort is missing in this plot.
+
+Plots 4 and 5 are showing the effort as kW Fishing days by year, when filtering the effort at Country level for the CIBBRiNA case study fleets. The Country level is filtered by the CS countries, gears and areas. When submitting data to the FDI the country can mark data as confidential, typically if there are less than 3 vessels in the aggregation level of data submission. In this plot, the difference between the effort on EU level and the country level is added as 'Unknown'. This difference can be due to data marked as confidential, but can also be due to other MS than the ones defined in the case study have fishing effort in this fleet. 
+
+```{r CS8kWFDYear, fig.dim= c(6, 4)}
+# Plot total for EU 
+plot_fleet_index_var(FDI_fleet_EU, "CS8_Demersal_trawl", "kWFishDaysEU", base_year = 2013, title_prefix = "EU")
+
+# MS effort by country
+plots1 <- plot_fleet_MS_var(FDI_fleet_MS, "CS8_Demersal_trawl", "kWFishDaysMS")
+  print(plots1[[1]])  # Barplot
+  print(plots1[[2]])  # Stacked barplot
+
+# MS total effort incl. confidential
+plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS8_Demersal_trawl", "kWFishDaysMS")
+  print(plots2[[1]])  # Barplot
+  print(plots2[[2]])  # Stacked barplot
+
+```
+
+### N effort rows confidential
+
+Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
+
+```{r CS8nConf, fig.dim= c(6, 4)}
+chart_types <- c("bar", "stacked", "heatmap", "bubble")
+for (ct in chart_types) {
+  print(plot_confidential(FDI_rows_confidential, "CS8_Demersal_trawl", chart_type = ct))
+}
+
+```
+
+### Vessel length
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDVL, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS8_Demersal_trawl", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS8_Demersal_trawl", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Vessel length grouped
+
+In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
+
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+
+Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDVLG, fig.dim= c(6, 4)}
+plots_EU <- plot_fleet_by_length(effort_EU2, "CS8_Demersal_trawl", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_length(effort_MS2, "CS8_Demersal_trawl", "VL_GR", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+```
+
+### Metier level 6
+
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDMet, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier),
+  
+  effort_MS2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(Metier, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(Metier)
+)
+
+# Create consistent color palette
+#metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+#metier_colors_consistent["Other"] <- "#B0B0B0"
+
+# Generate extended color palette
+palette_func <- colorRampPalette(brewer.pal(12, "Set3"))
+metier_colors_consistent <- setNames(palette_func(length(top_metiers_all)), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS8_Demersal_trawl", "Metier", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS8_Demersal_trawl", "Metier", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 5
+
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDMet5, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5),
+  
+  effort_MS2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(metier_lvl5, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(metier_lvl5)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS8_Demersal_trawl", "metier_lvl5", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS8_Demersal_trawl", "metier_lvl5", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Metier level 4
+
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+
+Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
+
+As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+
+The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
+
+The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
+
+The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
+
+The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+
+
+```{r CS8FDMet4, fig.dim= c(6, 4)}
+# Combine top metiers from both datasets
+top_metiers_all <- union(
+  effort_EU2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4),
+  
+  effort_MS2 %>% filter(CSfleet == "CS8_Demersal_trawl") %>%
+    count(gear_lvl4, wt = Total.Fishing.Days) %>%
+    top_n(10, wt = n) %>% pull(gear_lvl4)
+)
+
+# Create consistent color palette
+metier_colors_consistent <- setNames(brewer.pal(length(top_metiers_all), "Set3"), top_metiers_all)
+metier_colors_consistent["Other"] <- "#B0B0B0"
+
+plots_EU <- plot_fleet_by_metier(effort_EU2, "CS8_Demersal_trawl", "gear_lvl4", "Total.Fishing.Days", title_prefix = "EU", top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_EU[[1]])
+print(plots_EU[[2]])
+
+plots_MS <- plot_fleet_by_metier(effort_MS2, "CS8_Demersal_trawl", "gear_lvl4", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE, top_n = 10, metier_colors = metier_colors_consistent)
+print(plots_MS[[1]])
+print(plots_MS[[2]])
+
+```
+
+### Quarter
+
+Plots of fishing days by quarter and year (first plot) and by country (second plot)
+
+```{r CS8FDQ, fig.dim= c(6, 4)}
+plot_quarterly_effort(effort_EU2, "CS8_Demersal_trawl", "Total.Fishing.Days", title_prefix = "EU")
+plot_quarterly_effort(effort_MS2, "CS8_Demersal_trawl", "Total.Fishing.Days", title_prefix = "MS", facet_by_country = TRUE)
+
+```
+
+### Area
+
+Plots of fishing days by areas. 
+Plot 1 shows fishing days per year and area.
+Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
+Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+
+```{r CS8A, fig.dim= c(6, 4)}
+#plots_area <- plot_area_effort(effort_EU2, "CS8_Demersal_trawl", title_prefix = "EU")
+#print(plots_area[[1]])
+#print(plots_area[[2]])
+
+plots_area_vl <- plot_area_effort(effort_EU2, "CS8_Demersal_trawl", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
+print(plots_area_vl[[1]])
+print(plots_area_vl[[2]])
+
+plots_area_metier <- plot_area_effort(effort_EU2, "CS8_Demersal_trawl", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+print(plots_area_metier[[1]])
+print(plots_area_metier[[2]])
+
+```
+
+### Maps
+
+Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+
+```{r CS8area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS8 Demersal trawl effort, ICES areas (2023)"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS8_FDI_EU_demersal_trawl_2023_area.png")
+
+```
+
+```{r CS8rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS8 Demersal trawl effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+
+knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS8_FDI_EU_demersal_trawl_2023_rectangle.png")
+
+```
