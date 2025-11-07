@@ -1,0 +1,1689 @@
+
+```{r title, include = FALSE}
+front_title <- "DRAFT - RDBES effort data CIBBRiNA"
+```
+
+<!-- The output directory below defines the path the html file will be saved at -->
+
+---
+title: `r front_title`
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_file = paste0(substr(inputFile,1,nchar(inputFile)-4),".html"), 
+  output_dir = "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/html")})
+output:
+  html_document
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(scipen=999)
+```
+
+
+```{r libraries}
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(sf)
+library(ggforce)
+library(RColorBrewer)
+library(knitr)
+```
+
+
+```{r functions, include=FALSE}
+
+load_effort_data <- function(zip_path, file_name = "CommercialEffort.csv", gear_filter = NULL) {
+  # Load and subset relevant columns
+  effort_data <- read.csv(unz(zip_path, file_name)) %>%
+    select(
+      CEvesselFlagCountry, CEyear, CEquarter, CEmonth,
+      CEarea, CEstatisticalRectangle, CEnationalFishingActivity, CEmetier6,
+      CEincidentalByCatchMitigationDevice, CEvesselLengthCategory,
+      CEscientificDaysAtSea, CEscientificFishingDays, CEscientificNumberOfHaulsOrSets,
+      CEscientificVesselFishingHour, CEscientificSoakingMeterHour,
+      CEscientifickWDaysAtSea, CEscientifickWFishingDays, CEscientifickWFishingHours,
+      CEgearDimensions, CEconfidentialityFlag, CEencryptedVesselIds
+    ) %>%
+    mutate(
+      Metier_lvl5 = substr(CEmetier6, 1, 7),
+      Gear_lvl4 = substr(CEmetier6, 1, 3)
+    )
+  
+  # Optional gear filtering
+  if (!is.null(gear_filter)) {
+    effort_data <- effort_data %>% filter(Gear_lvl4 %in% gear_filter)
+  }
+  
+  return(effort_data)
+}
+
+create_availability_table <- function(data, group_var, value_var, caption, sort_values = FALSE) {
+  tbl <- data %>%
+    distinct({{group_var}}, {{value_var}}) %>%
+    mutate(data_available = "Y") %>%
+    pivot_wider(names_from = {{value_var}}, values_from = data_available, values_fill = list(data_available = "–"))
+  
+  if (sort_values && is.numeric(data[[deparse(substitute(value_var))]])) {
+    sorted_cols <- as.character(sort(unique(data[[deparse(substitute(value_var))]])))
+    tbl <- tbl %>% select({{group_var}}, all_of(sorted_cols))
+  }
+  
+  kable(tbl, caption = caption)
+}
+
+
+calculate_percent_available <- function(data, group_vars, target_var, caption) {
+  tbl <- data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(
+      total_rows = n(),
+      non_na_rows = sum(!is.na(.data[[target_var]])),
+      percent_available = ifelse(total_rows > 0, round(100 * non_na_rows / total_rows, 1), NA_real_),
+      .groups = "drop"
+    ) %>%
+    select(all_of(group_vars), percent_available) %>%
+    pivot_wider(names_from = group_vars[2], values_from = percent_available)
+  
+  kable(tbl, caption = caption)
+}
+
+
+calculate_confidentiality <- function(data, group_var, flag_var = "CEconfidentialityFlag", caption) {
+  tbl <- data %>%
+    group_by({{group_var}}) %>%
+    summarise(
+      total_rows = n(),
+      confidential_rows = sum(.data[[flag_var]] == "Y", na.rm = TRUE),
+      percent_confidential = round(100 * confidential_rows / total_rows, 1),
+      .groups = "drop"
+    )
+  
+  kable(tbl, caption = caption)
+}
+
+
+aggregate_effort_by_vessel <- function(data, extra_group = NULL) {
+  # Define base grouping variables
+  group_vars <- c("CEyear", "CEencryptedVesselIds")
+  
+  # If an extra grouping variable is provided, add it
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and summarise
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(across(starts_with("CEscientific"), ~sum(.x, na.rm = TRUE)), .groups = "drop")
+}
+
+aggregate_effort_by_year <- function(data, extra_group = NULL) {
+  # Define base grouping variable
+  group_vars <- c("CEyear")
+  
+  # Add extra grouping variable if provided
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and summarise
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(across(starts_with("CEscientific"), ~sum(.x, na.rm = TRUE)), .groups = "drop")
+}
+
+count_vessels_per_year <- function(data, extra_group = NULL) {
+  # Separate multiple vessel IDs
+  data <- data %>%
+    separate_rows(CEencryptedVesselIds, sep = "; ")
+  
+  # Define base grouping variable
+  group_vars <- c("CEyear")
+  
+  # Add extra grouping variable if provided
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and count distinct vessels
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(n_vessels = n_distinct(CEencryptedVesselIds), .groups = "drop")
+}
+
+merge_effort_and_vessels <- function(effort_data, vessel_data, by_vars = "CEyear") {
+  merge(effort_data, vessel_data, by = by_vars, all = TRUE)
+}
+
+plot_effort_metric <- function(data, metric, title, y_label, fill_var = NULL, color_scheme = NULL) {
+  p <- ggplot(data, aes(x = CEyear, y = .data[[metric]]))
+  
+  # If fill_var is provided, make it a stacked bar chart
+  if (!is.null(fill_var)) {
+    p <- p + aes(fill = .data[[fill_var]]) +
+      geom_bar(stat = "identity", position = "stack")
+    
+    # Apply custom color scheme if provided
+    if (!is.null(color_scheme)) {
+      p <- p + scale_fill_manual(values = color_scheme)
+    }
+  } else {
+    p <- p + geom_bar(stat = "identity", fill = "steelblue")
+  }
+  
+  p + labs(title = title, x = "Year", y = y_label, fill = fill_var) +
+    theme_minimal()
+}
+
+mask_small_vessel_counts <- function(data, threshold = 3) {
+  # Identify numeric columns to mask, excluding CEyear and n_vessels
+  cols_to_mask <- names(data)[sapply(data, is.numeric) & !(names(data) %in% c("CEyear", "n_vessels"))]
+  
+  # Apply masking
+  data %>%
+    mutate(across(all_of(cols_to_mask), ~ ifelse(n_vessels <= threshold, NA, .)))
+}
+
+summarize_sensitive_contribution_by_year <- function(data, threshold = 3) {
+  # Identify numeric columns to evaluate (excluding CEyear and n_vessels)
+  numeric_cols <- names(data)[sapply(data, is.numeric) & !(names(data) %in% c("CEyear", "n_vessels"))]
+  
+  # Group by year and calculate percentages
+  summary <- data %>%
+    group_by(CEyear) %>%
+    summarise(across(all_of(numeric_cols), ~ {
+      total <- sum(.x, na.rm = TRUE)
+      sensitive <- sum(.x[data$n_vessels <= threshold & data$CEyear == cur_group()$CEyear], na.rm = TRUE)
+      if (total > 0) round(100 * sensitive / total, 2) else NA
+    }), .groups = "drop")
+  
+  return(summary)
+}
+
+
+plot_fishing_effort_map <- function(year, effort_data) {
+  # Filter data for the selected year
+  effort_year <- effort_data[effort_data$CEyear == year, ]
+  
+  # Convert to sf if not already
+  if (!inherits(effort_year, "sf")) {
+    effort_year <- st_as_sf(effort_year)
+  }
+  
+  # Transform land layer to match CRS
+  land_sf_transformed <- st_transform(land_sf, st_crs(effort_year))
+  
+  # Get bounding box
+  bbox <- st_bbox(effort_year)
+  
+  # Plot
+  ggplot() +
+    geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +
+    geom_sf(data = effort_year, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
+    scale_fill_gradientn(colors = custom_palette, name = "Scientific Fishing Days") +
+    coord_sf(
+      xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
+      ylim = c(as.numeric(bbox["ymin"]), as.numeric(bbox["ymax"])),
+      expand = FALSE
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("RDBES Scientific Fishing Days by CE Area (", year, ")", sep = "")
+    )
+}
+
+
+plot_fishing_effort_rect_map <- function(year, effort_data) {
+  # Filter data for the selected year
+  effort_year <- effort_data[effort_data$CEyear == year, ]
+  
+  # Convert to sf if not already
+  if (!inherits(effort_year, "sf")) {
+    effort_year <- st_as_sf(effort_year)
+  }
+  
+  # Transform land layer to match CRS
+  land_sf_transformed <- st_transform(land_sf, st_crs(effort_year))
+  
+  # Get bounding box
+  bbox <- st_bbox(effort_year)
+  
+  # Plot with land layer on top
+  ggplot() +
+    geom_sf(data = effort_year, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
+    geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +  # land layer on top
+    scale_fill_gradientn(colors = custom_palette, name = "Scientific Fishing Days") +
+    coord_sf(
+      xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
+      ylim = c(as.numeric(bbox["ymin"]), as.numeric(bbox["ymax"])),
+      expand = FALSE
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("RDBES Scientific Fishing Days by CE Rectangle (", year, ")", sep = "")
+    )
+}
+
+
+```
+
+
+```{r source, message = FALSE, warning = FALSE, results='hide'}
+datapath <- "H:/c-users/CIBBRiNA/RDBES"
+gear_gillnet <- c("GNC","GND","GNS","GTR","GTN")
+gear_longline <- c("LHM","LHP","LLD","LLS", "LNB","LTL")
+gear_pelagic <- c("OTM","PTM")
+gear_demersal <- c("OTB","PTB","TBB")
+
+effort_cs1 <- load_effort_data(file.path(datapath, "RDBES CE CS1 DK DE IS NO PL SE 3.20-26 4 5a2.zip"), gear_filter = gear_gillnet)
+effort_cs2 <- load_effort_data(file.path(datapath, "RDBES CE CS2 ES 8c 9a.zip"), gear_filter = gear_gillnet)
+effort_cs3 <- load_effort_data(file.path(datapath, "RDBES CE CS3 UK 4 6 7d-j.zip"), gear_filter = gear_gillnet)
+effort_cs6 <- load_effort_data(file.path(datapath, "RDBES CE CS6 UK 4a 6a 7bj.zip"), gear_filter = gear_longline)
+effort_cs7 <- load_effort_data(file.path(datapath, "RDBES CE CS7 UK DK NL 4 6 7 8a.zip"), gear_filter = gear_pelagic)
+effort_cs8 <- load_effort_data(file.path(datapath, "RDBES CE CS8 NL 3a 4bc 7d.zip"), gear_filter = gear_demersal)
+
+#Area shapefile
+area <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Areas_20160601_cut_dense_3857.shp", quiet = TRUE)
+
+area$CEarea <- area$Area_Full
+area <- subset(area, select=c(CEarea, geometry))
+area$CEarea[area$CEarea %in% c("27.10.a.1", "27.10.a.2")] <- "27.10.a"
+area$CEarea[area$CEarea %in% c("27.5.a.1", "27.5.a.2")] <- "27.5.a"
+area$CEarea[area$CEarea %in% c("27.6.b.1", "27.6.b.2")] <- "27.6.b"
+area$CEarea[area$CEarea %in% c("27.7.c.1", "27.7.c.2")] <- "27.7.c"
+
+area2 <- area %>%
+  group_by(CEarea) %>%
+  summarise(geometry = st_union(geometry), .groups = "drop") %>%
+  st_as_sf()
+
+#Rectangle shapefile
+rect <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Statistical_Rectangles_Eco.shp", quiet = TRUE)
+
+rect$CEstatisticalRectangle <- rect$ICESNAME
+rect <- subset(rect, select=c(CEstatisticalRectangle, geometry))
+
+capture.output({
+  land_sf <- sf::st_read("Q:/50-radgivning/02-mynd/Josefine/GIS/Kystlinie.shp")
+}, file = NULL)
+
+
+```
+
+## RDBES effort data for CIBBRiNA {.tabset}
+
+### Overview
+
+The RDBES data are submitted after a joint RCG and ICES data call in 2025. The effort data are on ICES area and ICES rectangle spatial resolution, and have the scientific effort estimates and optional fields like net 'length* soaking time' and 'incidental bycatch mitigation device' fields that could be of relevance to the bycatch assessments.
+
+A letter was sent from the CIBBRiNA project lead to the National Correspondents in case of EU countries and to ICES ACOM members in case of non-EU countries. The letter and responses can be found in separate tabs.
+
+For most MS CIBBRiNA are granted permission to use the data for the purpose of the project, under the conditions that confidentiality restrictions specified in responses, in the RDBES data license and in the 'Conditions of use' document that is signed by experts with access to the data. Three member states did not grant permission for the project to get the data directly from ICES, but would like to run the script on national data and only share outputs.
+
+ * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany.
+ * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
+ * Case study 3: UK static nets
+ * Case study 4: Deepwater longlines in Portuguese waters - Not included - Portugal did not give permission use the data
+ * Case study 5: Surface longlines in Madeira waters - Not included - Portugal did not give permission use the data
+ * Case study 6: UK longlines 
+ * Case study 7: Pelagic trawl fisheries - Ireland not included, they did not give permission to use the data.
+ * Case study 8: Demersal trawl fisheries in Greater North Sea - Only Netherlands. Belgium did not give permission to use the data. 
+ 
+ The outputs in this html file is giving overview of data availability and quality, and is showing only data values if there are more than 3 vessels (>=3).
+ 
+### Letter to NCs
+
+Letter to NCs 3rd March 2025:
+
+As part of the LIFE-funded (LIFE-2022-SAP-NAT) CIBBRiNA project, we would like to request the access and use of fishing effort data submitted to ICES for the RDBES data call (2021-2023 and 2024-2025 data when available) and to the ICES VMS/Logbook spatial fisheries data call (2021-2023 and 2024-2025 data when available).
+
+The mission of the CIBBRiNA project is to work together with fishers, authorities, scientists, and other relevant stakeholders to minimise bycatch of Endangered, Threatened and Protected (ETP) species in the North-east Atlantic, Baltic and Mediterranean. Some important objectives of the CIBBRiNA project are to use and enhance the currently available information on fishing effort, spatial-temporal distributions of Endangered, Threatened and Protected (ETP) species and occurrences of bycatches of those species. Access to the effort data collated held by ICES will complement the information collected in the CIBBRiNA case studies where we monitor the occurrence, estimate the magnitude of bycatch, and evaluate the effectiveness of bycatch mitigation strategies. The methods developed and results obtained in the project will be available to ICES to complement the important work done by ICES to provide evidence on the occurrence, monitoring and reduction of sensitive species bycatch more generally.
+
+Work package 5 of the CIBBRiNA project, aims to improve the time-series of fishing effort for the project’s case studies using detailed fisheries information held by ICES. The details of the requested effort data are specified in Annex 1. Data for the project will be filtered to match the CIBBRiNA case study fleets. These data can enhance our understanding of the causes of bycatches during fishing operations or under specific conditions. With an improved knowledge of the bycatch events in relation to fishing activities, we will be able to advance statistical modelling techniques to estimate bycatch risks. Eventually, we will develop methods to expand the range of conditions in which bycatch rates can be estimated for the species and fisheries for which data are available.
+
+We are committed to complying with the ICES Data Policy for the ICES RDBES and VMS/Logbook data. We are also committed to the CIBBRiNA Data Management Policy which is part of the project’s “Safe Working Environment”, which (among other things) aims to ensure that sensitive information is handed appropriately and that the interests of partners from all stakeholder groups are respected. Data users will sign the required ICES data access license. All analytical data queries will be versioned and accessible via GitHub. Data will only be used for analysis within the CIBBRiNA project and results will be presented in CIBBRiNA reports, presentations and ultimately scientific papers, respecting all confidentiality restrictions. Resulting bycatch estimates will be presented by case study fleets, and as the data requested includes field with encrypted vessel-ids, it will be possible to mask aggregations resulting in less than three vessels in outputs (maps/tables/graphs).
+We are asking for your permission to query the effort data held at ICES. No further actions are required from your end regarding the data extraction. The ICES data center will provide us with the data needed if permission is granted. In case you have any questions or concerns, please let us know.
+
+Please let us know at your earliest convenience whether you:
+1.
+grant access to the data has been provided by your country under the existing RDBES and VMS/Logbook spatial fisheries data calls (2021-2023)
+2.
+grant access to the data that will be provided by your country to the 2024-2025 RDBES and VMS/Logbook spatial fisheries data calls
+
+
+### NC responses
+
+MS that granted permission: 
+
+ 
+ * Denmark: DTU Aqua hereby grant access to the requested data. However, the requested data can only be used for the requested purposes, and most be deleted thereafter. Also, published data may not be traceable to specific fishers.
+
+ * France: give access to the data, as long as the data is aggregated so that it represents at least 5 vessels. 
+
+ * Germany: give consent to access and use of fishing effort data submiƩed to ICES for the RDBES and VMS/logbook 
+data calls (2021-2023 and 2024-2025 data when available). 
+
+ * Iceland: You have our permission to use the data from Iceland. 
+ 
+ * Netherlands: The data can be used for the CIBBRiNA project. Despite already referencing the specific ICES conditions, I want to reiterate that the data may only be used to address the questions outlined in the project and the original request. Furthermore, the project must implement all necessary measures to safeguard the data from unauthorised use.
+
+ * Norway: We (IMR) give you permission to do this.
+ 
+ * Poland: Give permission to access to and use of fishing effort data submitted to ICES for the RDBES and 
+VMS/logbook data calls by POL is hereby granted.  While appreciating the assurance of compliance with the ICES conditions of access to and use of data, I would like to emphasize the absolute obligation to use the data provided solely for the purpose of achieving the project objectives and specified in the initial request for access to data. Project implementers must take all necessary measures to protect data against unauthorized use
+
+ * Spain: We hereby grant that Spain approves the use of eƯort data from ICES RDBES and VMS/Logbook data calls, provided that the confidentiality of the data must be guaranteed in the scientific work and in publication. Regarding the confidentiality when the data are public, we would like to highlight that the data must be presented in such a way that no natural person or legal entities can be identified, either directly or indirectly. The level of aggregation must be checked to ensure that the number of vessels in each segment is suƯicient to guarantee a vessel cannot be identified directly or indirectly to comply with the Regulation. 
+
+ * Sweden: SWE give consent, as long as the request respect the ICES Data Policy and that the results presented in the 
+reports will be appropriately aggregated to maintain data confidentiality.
+
+ * UK: give permission for the UK data held by ICES to be used for this particular project. 
+
+Countries that did not grant permission:
+
+ * Belgium: Under the current Belgian Data Sharing Agreement between ILVO and our control agency (Department of Agriculture and Fisheries – Control department) we have explicit permission to use logbooks data in response to legal data calls. Unfortunately, we don’t have permission to share the data with projects, without seeking permission from our control agency. And to keep the continuity of a good corporatin with them, we like to respect this. However, as we realize it is important for the project, to be able to use effort data from ICES RDBES and VMS/Logbook data call, a potential solution would be that ILVO processes the data as required and just provide the outputs. CIBBRiNA provides the scripts and we run any scripts/output formats on the data we delivered to data calls. We can then check if the outputs are aggregated sufficiently for us to share with the project. Would the proposed solution be useable for the project? I realize it is quite a formal approach, but as a MS we need to adhere to this formal approach as these data fall under the DCF (EC 2017/1004).
+
+ * Ireland: Under our current Data Sharing Agreement with our control agency (SFPA) we have explicit permission to use logbooks data in response to legal data calls. Generally we don’t have permission to share the data with projects, without seeking permission from our control agency. A potential solution would be for us to process the data as required and just provide the outputs e.g. we run the scripts on our data ourselves.
+ 
+ * Portugal: Would like to apply the same conditions as Belgium and Ireland, to run script on their data and share outputs.
+ 
+
+
+```{r Data}
+country_colors <- c(
+  "SE" = "#1f77b4",  # Sweden
+  "DE" = "#ff7f0e",  # Germany
+  "PL" = "#2ca02c",  # Poland
+  "DK" = "#d62728",  # Denmark
+  "ES" = "#9467bd",  # Spain
+  "UK" = "#8c564b",  # United Kingdom (general)
+  "PT" = "#e377c2",  # Portugal
+  "NL" = "#7f7f7f",  # Netherlands
+  "IE" = "#bcbd22",  # Ireland
+  "BE" = "#17becf",  # Belgium
+  "Unknown" = "#cccccc",  # Unknown
+  "GB-SCT" = "#1b9e77",  # Scotland
+  "GB-ENG" = "#d95f02",  # England
+  "GB-WLS" = "#7570b3",  # Wales
+  "GB-NIR" = "#e41a1c"   # Northern Ireland
+)
+
+vessel_length_colors <- c(
+  "NK" = "#d9d9d9", "VL0006" = "#c6dbef", "VL0608" = "#9ecae1", "VL0810" = "#6baed6",
+  "VL1012" = "#4292c6", "VL1215" = "#2171b5" , "VL1518" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+vessel_length_colors_reduced <- c(
+  "NK" = "#d9d9d9", "VL0012" = "#4292c6", "VL1218" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+gear_colors <- c(
+  "DRB" = "#1f77b4", "DRH" = "#aec7e8", "FPN" = "#ff7f0e", "FPO" = "#ffbb78", "FYK" = "#2ca02c","GNC" = "#98df8a",
+  "GND" = "#d62728", "GNS" = "#ff9896", "GTR" = "#9467bd", "LHP" = "#c5b0d5", "LLD" = "#8c564b", "LLS" = "#c49c94",  
+  "LTL" = "#e377c2", "MIS" = "#f7b6d2", "OTB" = "#7f7f7f", "OTM" = "#c7c7c7", "OTT" = "#bcbd22", "PS_" = "#dbdb8d",
+  "PTB" = "#17becf", "PTM" = "#9edae5", "SB_" = "#393b79", "SDN" = "#637939", "SSC" = "#8c6d31", "TBB" = "#843c39"  
+)
+
+
+# Define custom color palette
+custom_palette <- c(
+  "#f5f5dc",  # very light beige
+  "#ffa500",  # orange
+  "#ff0000",  # red
+  "#8b0000",  # dark red
+  "#5c4033"   # dark brown
+)
+
+```
+
+## CIBBRiNA Case Study 1: Northern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.5.a, 27.4.a, 27.4.b, 27.4.c, 27.3.a.20, 27.3.a.21, 27.3.b.23, 27.3.c.22, 27.3.d.24, 27.3.d.25, 27.3.d.26
+
+Countries in CS: Germany, Denmark,Poland, Sweden, Iceland
+
+Countries in RDBES data: Germany, Denmark,Poland, Sweden
+
+### RDBES Data overview
+
+```{r CS1O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(effort_cs1, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs1, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs1, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs1, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs1, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs1, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs1, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS1Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs1)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_masked, "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets", "Number of hauls/sets")
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_masked, "CEscientificVesselFishingHour", "Total vessel fishing hours", "Vessel fishing hours")
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_masked, "CEscientificSoakingMeterHour", "Total soaking meter hours", "Soaking meter hours")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingHours", "Total kW * Fishing hours", "kW * Fishing hours")
+
+```
+
+### Effort plots by country
+
+```{r CS1Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs1, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs1, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs1, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_country_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by country", "Number of hauls/sets", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by country", "Vessel fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by country", "Soaking meter hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by country", "kW * Fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS1VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs1, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs1, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs1, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_length_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by vessel length", "Number of hauls/sets", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by vessel length", "Vessel fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by vessel length", "Soaking meter hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by vessel length", "kW * Fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS1Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs1, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs1, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs1, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by gear", "Number of hauls/sets", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by gear", "Vessel fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by gear", "Soaking meter hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by gear", "kW * Fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS1Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs1, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs1, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs1, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+ 
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS1Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs1, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs1, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs1, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+ 
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
+
+
+## CIBBRiNA Case Study 2: Southern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.8.c, 27.9.a
+
+Countries: Spain
+
+
+### RDBES Data overview
+
+```{r CS2O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(effort_cs2, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs2, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs2, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs2, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs2, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs2, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs2, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS2Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs2)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+```
+
+### Effort plots by country
+
+```{r CS2Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs2, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs2, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs2, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS2VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs2, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs2, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs2, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS2Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs2, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs2, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs2, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS2Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs2, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs2, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs2, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+ 
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS2Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs2, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs2, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs2, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+ 
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
+
+## CIBBRiNA Case Study 3: UK static nets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Countries: United Kingdom
+
+### RDBES Data overview
+
+```{r CS3O, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+create_availability_table(effort_cs3, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs3, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs3, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs3, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs3, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs3, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs3, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS3Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs3)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+```
+
+### Effort plots by country
+
+```{r CS3Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs3, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs3, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs3, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS3VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs3, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs3, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs3, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS3Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs3, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs3, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs3, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS3Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs3, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs3, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs3, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+ 
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS3Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs3, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs3, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs3, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
+
+## CIBBRiNA Case Study 5: UK longlines {.tabset}
+
+Gears: LHM,LHP,LLD,LLS,LNB,LTL
+
+Areas: 27.6.a,27.7.b,27.7.j,27.4.a
+
+Countries: United Kingdom
+
+### RDBES Data overview
+
+```{r CS6O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(effort_cs6, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs6, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs6, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs6, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs6, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs6, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs6, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS6Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs6)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+```
+
+### Effort plots by country
+
+```{r CS6Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs6, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs6, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs6, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS6VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs6, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs6, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs6, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS6Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs6, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs6, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs6, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS6Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs6, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs6, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs6, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+ 
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS6Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs6, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs6, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs6, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+ 
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
+
+## CIBBRiNA Case Study 7: Pelagic trawl fisheries {.tabset}
+
+Gears: OTM, PTM
+
+Areas: 27.4.a,27.4.b,27.4.c,27.6.a,27.6.b,27.7.a,27.7.b,27.7.c,27.7.d,27.7.e,27.7.f,27.7.g,27.7.h,27.7.j,27.7.k,27.8.a
+
+Case study countries: United Kingdom,Denmark,Ireland,Netherlands
+RDBES data countries: United Kingdom,Denmark,Netherlands
+
+### RDBES Data overview
+
+```{r CS7O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(effort_cs7, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs7, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs7, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs7, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs7, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs7, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs7, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS7Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs7)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_masked, "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets", "Number of hauls/sets")
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_masked, "CEscientificVesselFishingHour", "Total vessel fishing hours", "Vessel fishing hours")
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_masked, "CEscientificSoakingMeterHour", "Total soaking meter hours", "Soaking meter hours")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingHours", "Total kW * Fishing hours", "kW * Fishing hours")
+
+```
+
+### Effort plots by country
+
+```{r CS7Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs7, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs7, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs7, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_country_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by country", "Number of hauls/sets", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by country", "Vessel fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by country", "Soaking meter hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by country", "kW * Fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS7VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs7, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs7, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs7, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_length_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by vessel length", "Number of hauls/sets", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by vessel length", "Vessel fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by vessel length", "Soaking meter hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by vessel length", "kW * Fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS7Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs7, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs7, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs7, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by gear", "Number of hauls/sets", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by gear", "Vessel fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by gear", "Soaking meter hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by gear", "kW * Fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS7Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs7, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs7, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs8, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+ 
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS7Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs7, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs7, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs7, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
+
+## CIBBRiNA Case Study 8: Demersal trawl fisheries in Greater North Sea {.tabset}
+
+Gears: OTB, PTB, TBB
+
+Areas: 27.3.a.20,27.4.b,27.4.c,27.7.d
+
+Case study countries: Belgium,Netherlands
+RDBES data countries: Netherlands
+
+### RDBES Data overview
+
+```{r CS8O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(effort_cs8, CEvesselFlagCountry, CEyear, "Countries and years with available effort data")
+create_availability_table(effort_cs8, CEvesselFlagCountry, CEmonth, "Countries and month with available effort data", sort_values = TRUE)
+create_availability_table(effort_cs8, CEvesselFlagCountry, CEarea, "Countries and area with available effort data")
+create_availability_table(effort_cs8, CEvesselFlagCountry, CEincidentalByCatchMitigationDevice, "Countries and bycatch mitigation device with available effort data")
+
+calculate_percent_available(effort_cs8, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificNumberOfHaulsOrSets", "Percentage of rows with CEscientificNumberOfHaulsOrSets by Country and Gear_lvl4")
+calculate_percent_available(effort_cs8, c("CEvesselFlagCountry", "Gear_lvl4"), "CEscientificSoakingMeterHour", "Percentage of rows with CEscientificSoakingMeterHour by Country and Gear_lvl4")
+
+calculate_confidentiality(effort_cs8, CEvesselFlagCountry, caption = "Percentage of rows with CEconfidentialityFlag = Y by Country. This is an additional confidentiality information field beside the numbers of vessels in the 'Encrypted Vesselids'. This confidentiality flag is filled in based on the national confidentiality rules. The rows marked as confidential must be used according to the rule defined in RDBES Data License: the rows need to be removed in outputs.")
+
+```
+
+
+### Effort plots total
+
+```{r CS8Tot, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid <- aggregate_effort_by_vessel(effort_cs8)
+effort_sum <- aggregate_effort_by_year(effort_sum_vid)
+CE_vid1 <- count_vessels_per_year(effort_sum_vid)
+effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
+effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_masked, "CEscientificFishingDays", "Total Fishing Days per Year", "Fishing Days")
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_masked, "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets", "Number of hauls/sets")
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_masked, "CEscientificVesselFishingHour", "Total vessel fishing hours", "Vessel fishing hours")
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_masked, "CEscientificSoakingMeterHour", "Total soaking meter hours", "Soaking meter hours")
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_masked, "CEscientifickWDaysAtSea", "Total kW * Days at sea", "kW * Days at sea")
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingDays", "Total kW * Fishing days", "kW * Fishing days")
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_masked, "CEscientifickWFishingHours", "Total kW * Fishing hours", "kW * Fishing hours")
+
+```
+
+### Effort plots by country
+
+```{r CS8Country, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_country <- aggregate_effort_by_vessel(effort_cs8, extra_group = "CEvesselFlagCountry")
+effort_year_country <- aggregate_effort_by_year(effort_cs8, extra_group = "CEvesselFlagCountry")
+vessel_count_country <- count_vessels_per_year(effort_cs8, extra_group = "CEvesselFlagCountry")
+effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
+effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_country_masked , "CEscientificFishingDays", "Total Fishing Days by country", "Fishing Days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_country_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by country", "Number of hauls/sets", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by country", "Vessel fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_country_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by country", "Soaking meter hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by country", "kW * Days at sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by country", "kW * Fishing days", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_country_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by country", "kW * Fishing hours", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
+
+```
+
+### Effort plots by vessel length
+
+```{r CS8VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_length <- aggregate_effort_by_vessel(effort_cs8, extra_group = "CEvesselLengthCategory")
+effort_year_length <- aggregate_effort_by_year(effort_cs8, extra_group = "CEvesselLengthCategory")
+vessel_count_length <- count_vessels_per_year(effort_cs8, extra_group = "CEvesselLengthCategory")
+effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
+effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_length_masked , "CEscientificFishingDays", "Total Fishing Days by vessel length", "Fishing Days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_length_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by vessel length", "Number of hauls/sets", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by vessel length", "Vessel fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_length_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by vessel length", "Soaking meter hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by vessel length", "kW * Days at sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by vessel length", "kW * Fishing days", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_length_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by vessel length", "kW * Fishing hours", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### Effort plots by gear
+
+```{r CS8Gear, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_gear <- aggregate_effort_by_vessel(effort_cs8, extra_group = "Gear_lvl4")
+effort_year_gear <- aggregate_effort_by_year(effort_cs8, extra_group = "Gear_lvl4")
+vessel_count_gear <- count_vessels_per_year(effort_cs8, extra_group = "Gear_lvl4")
+effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
+effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
+
+# Plot scientific days at sea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Plot fishing days
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificFishingDays", "Total Fishing Days by gear", "Fishing Days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total number of hauls/sets
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificNumberOfHaulsOrSets", "Total number of hauls/sets by gear", "Number of hauls/sets", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total vessel fishing hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificVesselFishingHour", "Total vessel fishing hours by gear", "Vessel fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total soaking meter hours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientificSoakingMeterHour", "Total soaking meter hours by gear", "Soaking meter hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWDaysAtSea
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWDaysAtSea", "Total kW * Days at sea by gear", "kW * Days at sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingDays
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingDays", "Total kW * Fishing days by gear", "kW * Fishing days", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+# Total kWFishingHours
+plot_effort_metric(effort_sum1_gear_masked , "CEscientifickWFishingHours", "Total kW * Fishing hours by gear", "kW * Fishing hours", fill_var = "Gear_lvl4", color_scheme =gear_colors)
+
+```
+
+### Plots by area
+
+```{r CS8Area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_area <- aggregate_effort_by_vessel(effort_cs8, extra_group = "CEarea")
+effort_year_area <- aggregate_effort_by_year(effort_cs8, extra_group = "CEarea")
+vessel_count_area <- count_vessels_per_year(effort_cs8, extra_group = "CEarea")
+effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
+effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
+ 
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the area is grey")
+
+plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
+ 
+plot_fishing_effort_map(2022, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2023, effort_sum1_area_masked_geo)
+
+plot_fishing_effort_map(2024, effort_sum1_area_masked_geo)
+
+```
+
+### Plots by rectangle
+
+```{r CS8Rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+effort_sum_vid_rect <- aggregate_effort_by_vessel(effort_cs8, extra_group = "CEstatisticalRectangle")
+effort_year_rect <- aggregate_effort_by_year(effort_cs8, extra_group = "CEstatisticalRectangle")
+vessel_count_rect <- count_vessels_per_year(effort_cs8, extra_group = "CEstatisticalRectangle")
+effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
+effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
+summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+
+effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
+
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels the rectangle is grey")
+
+plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
+ 
+plot_fishing_effort_rect_map(2022, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2023, effort_sum1_rect_masked_geo)
+
+plot_fishing_effort_rect_map(2024, effort_sum1_rect_masked_geo)
+
+```
