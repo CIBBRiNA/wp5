@@ -1,0 +1,869 @@
+
+```{r title, include = FALSE}
+front_title <- "DRAFT - ICES VMS effort data CIBBRiNA"
+```
+
+<!-- The output directory below defines the path the html file will be saved at -->
+
+---
+title: `r front_title`
+date: "`r format(Sys.time(), '%d %B, %Y')`"
+knit: (function(inputFile, encoding) {
+  rmarkdown::render(inputFile, encoding = encoding, output_file = paste0(substr(inputFile,1,nchar(inputFile)-4),".html"), 
+  output_dir = "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/html")})
+output:
+  html_document
+fontsize: 12pt
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE)
+options(scipen=999)
+```
+
+
+```{r libraries}
+library(tidyr)
+library(dplyr)
+library(stringr)
+library(ggplot2)
+library(sf)
+library(ggforce)
+library(RColorBrewer)
+library(knitr)
+library(vmstools)
+```
+
+
+```{r functions, include=FALSE}
+
+create_availability_table <- function(data, group_var, value_var, caption, sort_values = FALSE) {
+  tbl <- data %>%
+    distinct({{group_var}}, {{value_var}}) %>%
+    mutate(data_available = "Y") %>%
+    pivot_wider(names_from = {{value_var}}, values_from = data_available, values_fill = list(data_available = "–"))
+  
+  if (sort_values && is.numeric(data[[deparse(substitute(value_var))]])) {
+    sorted_cols <- as.character(sort(unique(data[[deparse(substitute(value_var))]])))
+    tbl <- tbl %>% select({{group_var}}, all_of(sorted_cols))
+  }
+  
+  kable(tbl, caption = caption)
+}
+
+calculate_percent_available <- function(data, group_vars, target_var, caption) {
+  tbl <- data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(
+      total_rows = n(),
+      non_na_rows = sum(!is.na(.data[[target_var]])),
+      percent_available = ifelse(total_rows > 0, round(100 * non_na_rows / total_rows, 1), NA_real_),
+      .groups = "drop"
+    ) %>%
+    select(all_of(group_vars), percent_available) %>%
+    pivot_wider(names_from = group_vars[2], values_from = percent_available)
+  
+  kable(tbl, caption = caption)
+}
+
+aggregate_effort_by_vessel <- function(data, extra_group = NULL) {
+  # Define base grouping variables
+  group_vars <- c("year", "anonVessels")
+  
+  # If an extra grouping variable is provided, add it
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and summarise
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(fishingHours=sum(fishingHours, na.rm = TRUE))
+}
+
+aggregate_effort_by_year <- function(data, extra_group = NULL) {
+  # Define base grouping variable
+  group_vars <- c("year")
+  
+  # Add extra grouping variable if provided
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and summarise
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(fishingHours=sum(fishingHours, na.rm = TRUE))
+}
+
+count_vessels_per_year <- function(data, extra_group = NULL) {
+  # Separate multiple vessel IDs
+  data <- data %>%
+    separate_rows(anonVessels, sep = "; ")
+  
+  # Define base grouping variable
+  group_vars <- c("year")
+  
+  # Add extra grouping variable if provided
+  if (!is.null(extra_group)) {
+    group_vars <- c(group_vars, extra_group)
+  }
+  
+  # Group and count distinct vessels
+  data %>%
+    group_by(across(all_of(group_vars))) %>%
+    summarise(n_vessels = n_distinct(anonVessels), .groups = "drop")
+}
+
+merge_effort_and_vessels <- function(effort_data, vessel_data, by_vars = "year") {
+  merge(effort_data, vessel_data, by = by_vars, all = TRUE)
+}
+
+mask_small_vessel_counts <- function(data, threshold = 3) {
+  # Identify numeric columns to mask, excluding CEyear and n_vessels
+  cols_to_mask <- names(data)[sapply(data, is.numeric) & !(names(data) %in% c("year", "n_vessels"))]
+  
+  # Apply masking
+  data %>%
+    mutate(across(all_of(cols_to_mask), ~ ifelse(n_vessels <= threshold, NA, .)))
+}
+
+
+calculate_vessel_group_percentage <- function(data, vessel_column = "n_vessels", fishing_hours_column = "fishingHours") {
+  # Ensure numeric columns
+  data[[fishing_hours_column]] <- as.numeric(data[[fishing_hours_column]])
+  data[[vessel_column]] <- as.numeric(data[[vessel_column]])
+  
+  # Calculate fishing hours for groups with <= 3 vessels
+  data$le3 <- ifelse(data[[vessel_column]] <= 3, data[[fishing_hours_column]], 0)
+  
+  # Group and summarize
+  result <- data %>%
+    group_by(year) %>%
+    summarise(
+      total_fishing_hours = sum(.data[[fishing_hours_column]], na.rm = TRUE),
+      fishing_hours_le3 = sum(le3, na.rm = TRUE),
+      .groups = "drop"
+    ) %>%
+    mutate(
+      percentage_le3_vessels = ifelse(total_fishing_hours > 0, fishing_hours_le3 / total_fishing_hours * 100, 0)
+    )
+  
+  return(result)
+}
+
+
+plot_effort_metric <- function(data, metric, title, y_label, fill_var = NULL, color_scheme = NULL) {
+  p <- ggplot(data, aes(x = year, y = .data[[metric]]))
+  
+  # If fill_var is provided, make it a stacked bar chart
+  if (!is.null(fill_var)) {
+    p <- p + aes(fill = .data[[fill_var]]) +
+      geom_bar(stat = "identity", position = "stack")
+    
+    # Apply custom color scheme if provided
+    if (!is.null(color_scheme)) {
+      p <- p + scale_fill_manual(values = color_scheme)
+    }
+  } else {
+    p <- p + geom_bar(stat = "identity", fill = "steelblue")
+  }
+  
+  p + labs(title = title, x = "Year", y = y_label, fill = fill_var) +
+    theme_minimal()
+}
+
+plot_fishing_hours_map <- function(data, land_layer, year, value_column = "fishingHours2", palette = custom_palette, bbox) {
+  # Filter data for the selected year
+  data_year <- data[data$year == year, ]
+  
+  # Ensure the value column is numeric
+  data_year[[value_column]] <- as.numeric(data_year[[value_column]])
+  
+  # Create the plot
+  ggplot() +
+    geom_sf(data = data_year, aes(fill = .data[[value_column]]), color = NA) +
+    geom_sf(data = land_layer, fill = "grey95", color = NA) +
+    scale_fill_gradientn(
+      colors = palette,
+      name = "Fishing hours",
+      na.value = "grey80"
+    ) +
+    coord_sf(
+      xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
+      ylim = c(as.numeric(bbox["ymin"]), as.numeric(bbox["ymax"])),
+      expand = FALSE
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("ICES VMS fishing hours by c-square (", year, ")", sep = "")
+    )
+}
+
+
+process_case_study <- function(data_input, land_sf, palette, case_label = "Case Study") {
+  # Step 1: Aggregate fishing hours
+  VMS_csq <- data_input %>%
+    group_by(year, cSquare, anonVessels) %>%
+    summarize(fishingHours = sum(fishingHours, na.rm = TRUE))
+
+  VMS_csq_sum <- VMS_csq %>%
+    group_by(year, cSquare) %>%
+    summarize(fishingHours = sum(fishingHours, na.rm = TRUE))
+
+  # Step 2: Count vessels
+  VMS_vid <- VMS_csq %>% separate_rows(anonVessels, sep = ";")
+  VMS_vid1 <- VMS_vid %>%
+    group_by(year, cSquare) %>%
+    summarise(n_vessels = n_distinct(anonVessels))
+
+  # Step 3: Merge and flag <3 vessels
+  VMS_csq_sum1 <- merge(VMS_csq_sum, VMS_vid1, by = c("year", "cSquare"), all = TRUE)
+  VMS_csq_sum1$lt3 <- ifelse(VMS_csq_sum1$n_vessels <= 3, 'Y', 'N')
+  VMS_csq_sum1$fishingHours2 <- VMS_csq_sum1$fishingHours
+  VMS_csq_sum1$fishingHours2[VMS_csq_sum1$lt3 == 'Y'] <- NA
+
+  # Step 4: Add coordinates and polygons
+  coords <- CSquare2LonLat(VMS_csq_sum1$cSquare, 0.05)
+  coords$Csquare <- VMS_csq_sum1$cSquare
+
+  create_polygon <- function(lon, lat, buffer = 0.025) {
+    coords <- matrix(
+      c(lon - buffer, lat - buffer,
+        lon + buffer, lat - buffer,
+        lon + buffer, lat + buffer,
+        lon - buffer, lat + buffer,
+        lon - buffer, lat - buffer),
+      ncol = 2, byrow = TRUE
+    )
+    st_polygon(list(coords))
+  }
+
+  polygons <- lapply(1:nrow(coords), function(i) {
+    create_polygon(coords$SI_LONG[i], coords$SI_LATI[i])
+  })
+
+  polygon_sf <- st_sfc(polygons, crs = 4326)
+  polygon_sf <- st_sf(geometry = polygon_sf)
+
+  VMS_csq_sum1_geo <- cbind(VMS_csq_sum1, polygon_sf)
+  VMS_csq_sum1_geo <- st_as_sf(VMS_csq_sum1_geo)
+
+  # Step 5: Transform land layer and plot maps
+  land_sf_transformed <- st_transform(land_sf, st_crs(VMS_csq_sum1_geo))
+  bbox <- st_bbox(VMS_csq_sum1_geo)
+
+  unique_years <- unique(VMS_csq_sum1_geo$year)
+  for (yr in unique_years) {
+    print(plot_fishing_hours_map(
+      data = VMS_csq_sum1_geo,
+      land_layer = land_sf_transformed,
+      year = yr,
+      value_column = "fishingHours2",
+      palette = palette,
+      bbox = bbox
+    ))
+  }
+
+  # Step 6: Summary plot for <3 vessels
+  VMS_csq_sum12 <- VMS_csq_sum1 %>%
+    group_by(year, lt3) %>%
+    summarize(fishingHours = sum(fishingHours, na.rm = TRUE))
+
+  ggplot(VMS_csq_sum12, aes(x = factor(year), y = fishingHours, fill = lt3)) +
+    geom_bar(stat = "identity") +
+    scale_fill_manual(values = c("N" = "steelblue", "Y" = "red")) +
+    labs(
+      title = paste("Total fleet effort - rectangle -", case_label),
+      x = "Year", y = "Fishing hours", fill = "<= 3 vessels"
+    ) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 0.5))
+}
+
+```
+
+
+```{r source, echo=FALSE, message = FALSE, warning = FALSE, results='hide'}
+datapath <- "H:/c-users/CIBBRiNA/CIBBRINA_VMS_Request_2025/"
+
+load(paste(datapath, "CS1_Northern_Gillnets.Rdata", sep = ""))
+load(paste(datapath, "CS2_Southern_Gillnets.Rdata", sep = ""))
+load(paste(datapath, "CS3_UK_Static_Nets.Rdata", sep = ""))
+load(paste(datapath, "CS6_UK_Longlines.Rdata", sep = ""))
+load(paste(datapath, "CS7_Pelagic_Trawl_Fisheries.Rdata", sep = ""))
+load(paste(datapath, "CS7_Pelagic_Trawl_Fisheries.Rdata", sep = ""))
+cs7.data.output <- cs7.data.output[cs7.data.output$country != 'IE',]
+load(paste(datapath, "CS8_Demersal_Trawl_Fisheries.Rdata", sep = ""))
+cs8.data.output <- cs8.data.output[cs8.data.output$country != 'BE',]
+
+capture.output({
+  land_sf <- sf::st_read("Q:/50-radgivning/02-mynd/Josefine/GIS/Kystlinie.shp")
+}, file = NULL)
+
+```
+
+## ICES VMS data for CIBBRiNA {.tabset}
+
+### Overview
+
+The RDBES data are submitted after an ICES data call for VMS and logbook data issued annually. The effort data are on c-square 0.05 * 0.05 degree spatial resolution. 
+
+A letter was sent from the CIBBRiNA project lead to the National Correspondents in case of EU countries and to ICES ACOM members in case of non-EU countries. The letter and responses can be found in separate tabs.
+
+For most MS CIBBRiNA are granted permission to use the data for the purpose of the project, under the conditions that confidentiality restrictions specified in responses, in the RDBES data license and in the 'Conditions of use' document that is signed by experts with access to the data. Three member states did not grant permission for the project to get the data directly from ICES, but would like to run the script on national data and only share outputs.
+
+The outputs in this html file is giving overview of data availability and quality, and is showing only data values if there are more than 3 vessels (>=3).
+
+ * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany.
+ * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
+ * Case study 3: UK static nets
+ * Case study 4: Deepwater longlines in Portuguese waters - Not included - Portugal did not give permission use the data
+ * Case study 5: Surface longlines in Madeira waters - Not included - Portugal did not give permission use the data
+ * Case study 6: UK longlines 
+ * Case study 7: Pelagic trawl fisheries - Ireland not included, they did not give permission to use the data.
+ * Case study 8: Demersal trawl fisheries in Greater North Sea - Only Netherlands. Belgium did not give permission to use the data. 
+ 
+ A few comments from ICES secretariat:
+•	Unfortunately we can’t provide anything for two of the case studies, as there’s no Portuguese data.
+•	There’s only a partial response for Case Study 1, as there has been no Norwegian submission.
+•	For CS6, we’ve used LLS as the gear type, despite the request specifying LL, as the UK only uses LLS.
+
+
+### Letter to NCs
+
+Letter to NCs 3rd March 2025:
+
+As part of the LIFE-funded (LIFE-2022-SAP-NAT) CIBBRiNA project, we would like to request the access and use of fishing effort data submitted to ICES for the RDBES data call (2021-2023 and 2024-2025 data when available) and to the ICES VMS/Logbook spatial fisheries data call (2021-2023 and 2024-2025 data when available).
+
+The mission of the CIBBRiNA project is to work together with fishers, authorities, scientists, and other relevant stakeholders to minimise bycatch of Endangered, Threatened and Protected (ETP) species in the North-east Atlantic, Baltic and Mediterranean. Some important objectives of the CIBBRiNA project are to use and enhance the currently available information on fishing effort, spatial-temporal distributions of Endangered, Threatened and Protected (ETP) species and occurrences of bycatches of those species. Access to the effort data collated held by ICES will complement the information collected in the CIBBRiNA case studies where we monitor the occurrence, estimate the magnitude of bycatch, and evaluate the effectiveness of bycatch mitigation strategies. The methods developed and results obtained in the project will be available to ICES to complement the important work done by ICES to provide evidence on the occurrence, monitoring and reduction of sensitive species bycatch more generally.
+
+Work package 5 of the CIBBRiNA project, aims to improve the time-series of fishing effort for the project’s case studies using detailed fisheries information held by ICES. The details of the requested effort data are specified in Annex 1. Data for the project will be filtered to match the CIBBRiNA case study fleets. These data can enhance our understanding of the causes of bycatches during fishing operations or under specific conditions. With an improved knowledge of the bycatch events in relation to fishing activities, we will be able to advance statistical modelling techniques to estimate bycatch risks. Eventually, we will develop methods to expand the range of conditions in which bycatch rates can be estimated for the species and fisheries for which data are available.
+
+We are committed to complying with the ICES Data Policy for the ICES RDBES and VMS/Logbook data. We are also committed to the CIBBRiNA Data Management Policy which is part of the project’s “Safe Working Environment”, which (among other things) aims to ensure that sensitive information is handed appropriately and that the interests of partners from all stakeholder groups are respected. Data users will sign the required ICES data access license. All analytical data queries will be versioned and accessible via GitHub. Data will only be used for analysis within the CIBBRiNA project and results will be presented in CIBBRiNA reports, presentations and ultimately scientific papers, respecting all confidentiality restrictions. Resulting bycatch estimates will be presented by case study fleets, and as the data requested includes field with encrypted vessel-ids, it will be possible to mask aggregations resulting in less than three vessels in outputs (maps/tables/graphs).
+We are asking for your permission to query the effort data held at ICES. No further actions are required from your end regarding the data extraction. The ICES data center will provide us with the data needed if permission is granted. In case you have any questions or concerns, please let us know.
+
+Please let us know at your earliest convenience whether you:
+1.
+grant access to the data has been provided by your country under the existing RDBES and VMS/Logbook spatial fisheries data calls (2021-2023)
+2.
+grant access to the data that will be provided by your country to the 2024-2025 RDBES and VMS/Logbook spatial fisheries data calls
+
+
+### NC responses
+
+MS that granted permission: 
+
+ 
+ * Denmark: DTU Aqua hereby grant access to the requested data. However, the requested data can only be used for the requested purposes, and most be deleted thereafter. Also, published data may not be traceable to specific fishers.
+
+ * France: give access to the data, as long as the data is aggregated so that it represents at least 5 vessels. 
+
+ * Germany: give consent to access and use of fishing effort data submiƩed to ICES for the RDBES and VMS/logbook 
+data calls (2021-2023 and 2024-2025 data when available). 
+
+ * Iceland: You have our permission to use the data from Iceland. 
+ 
+ * Netherlands: The data can be used for the CIBBRiNA project. Despite already referencing the specific ICES conditions, I want to reiterate that the data may only be used to address the questions outlined in the project and the original request. Furthermore, the project must implement all necessary measures to safeguard the data from unauthorised use.
+
+ * Norway: We (IMR) give you permission to do this.
+ 
+ * Poland: Give permission to access to and use of fishing effort data submitted to ICES for the RDBES and 
+VMS/logbook data calls by POL is hereby granted.  While appreciating the assurance of compliance with the ICES conditions of access to and use of data, I would like to emphasize the absolute obligation to use the data provided solely for the purpose of achieving the project objectives and specified in the initial request for access to data. Project implementers must take all necessary measures to protect data against unauthorized use
+
+ * Spain: We hereby grant that Spain approves the use of eƯort data from ICES RDBES and VMS/Logbook data calls, provided that the confidentiality of the data must be guaranteed in the scientific work and in publication. Regarding the confidentiality when the data are public, we would like to highlight that the data must be presented in such a way that no natural person or legal entities can be identified, either directly or indirectly. The level of aggregation must be checked to ensure that the number of vessels in each segment is suƯicient to guarantee a vessel cannot be identified directly or indirectly to comply with the Regulation. 
+
+ * Sweden: SWE give consent, as long as the request respect the ICES Data Policy and that the results presented in the 
+reports will be appropriately aggregated to maintain data confidentiality.
+
+ * UK: give permission for the UK data held by ICES to be used for this particular project. 
+
+Countries that did not grant permission:
+
+ * Belgium: Under the current Belgian Data Sharing Agreement between ILVO and our control agency (Department of Agriculture and Fisheries – Control department) we have explicit permission to use logbooks data in response to legal data calls. Unfortunately, we don’t have permission to share the data with projects, without seeking permission from our control agency. And to keep the continuity of a good corporatin with them, we like to respect this. However, as we realize it is important for the project, to be able to use effort data from ICES RDBES and VMS/Logbook data call, a potential solution would be that ILVO processes the data as required and just provide the outputs. CIBBRiNA provides the scripts and we run any scripts/output formats on the data we delivered to data calls. We can then check if the outputs are aggregated sufficiently for us to share with the project. Would the proposed solution be useable for the project? I realize it is quite a formal approach, but as a MS we need to adhere to this formal approach as these data fall under the DCF (EC 2017/1004).
+
+ * Ireland: Under our current Data Sharing Agreement with our control agency (SFPA) we have explicit permission to use logbooks data in response to legal data calls. Generally we don’t have permission to share the data with projects, without seeking permission from our control agency. A potential solution would be for us to process the data as required and just provide the outputs e.g. we run the scripts on our data ourselves.
+ 
+ * Portugal: Would like to apply the same conditions as Belgium and Ireland, to run script on their data and share outputs.
+ 
+
+```{r Data}
+country_colors <- c(
+  "SE" = "#1f77b4",  # Sweden
+  "DE" = "#ff7f0e",  # Germany
+  "PL" = "#2ca02c",  # Poland
+  "DK" = "#d62728",  # Denmark
+  "ES" = "#9467bd",  # Spain
+  "UK" = "#8c564b",  # United Kingdom (general)
+  "PT" = "#e377c2",  # Portugal
+  "NL" = "#7f7f7f",  # Netherlands
+  "IE" = "#bcbd22",  # Ireland
+  "BE" = "#17becf",  # Belgium
+  "Unknown" = "#cccccc",  # Unknown
+  "GB-SCT" = "#1b9e77",  # Scotland
+  "GB-ENG" = "#d95f02",  # England
+  "GB-WLS" = "#7570b3",  # Wales
+  "GB-NIR" = "#e41a1c"   # Northern Ireland
+)
+
+vessel_length_colors <- c(
+  "NK" = "#d9d9d9", "VL0006" = "#c6dbef", "VL0608" = "#9ecae1", "VL0810" = "#6baed6",
+  "VL1012" = "#4292c6", "VL1215" = "#2171b5" , "VL1518" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+vessel_length_colors_reduced <- c(
+  "NK" = "#d9d9d9", "VL0012" = "#4292c6", "VL1218" = "#08519c",
+  "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
+)
+
+gear_colors <- c(
+  "DRB" = "#1f77b4", "DRH" = "#aec7e8", "FPN" = "#ff7f0e", "FPO" = "#ffbb78", "FYK" = "#2ca02c","GNC" = "#98df8a",
+  "GND" = "#d62728", "GNS" = "#ff9896", "GTR" = "#9467bd", "LHP" = "#c5b0d5", "LLD" = "#8c564b", "LLS" = "#c49c94",  
+  "LTL" = "#e377c2", "MIS" = "#f7b6d2", "OTB" = "#7f7f7f", "OTM" = "#c7c7c7", "OTT" = "#bcbd22", "PS_" = "#dbdb8d",
+  "PTB" = "#17becf", "PTM" = "#9edae5", "SB_" = "#393b79", "SDN" = "#637939", "SSC" = "#8c6d31", "TBB" = "#843c39"  
+)
+
+
+# Define custom color palette
+custom_palette <- c(
+  "#f5f5dc",  # very light beige
+  "#ffa500",  # orange
+  "#ff0000",  # red
+  "#8b0000",  # dark red
+  "#5c4033"   # dark brown
+)
+
+```
+
+## CIBBRiNA Case Study 1: Northern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.5.a, 27.4.a, 27.4.b, 27.4.c, 27.3.a.20, 27.3.a.21, 27.3.b.23, 27.3.c.22, 27.3.d.24, 27.3.d.25, 27.3.d.26
+
+Countries in CS: Germany, Denmark,Poland, Sweden, Iceland
+
+### ICES VMS data overview
+
+```{r CS1O, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+create_availability_table(cs1.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs1.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs1.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+### Plots by vessel length
+
+```{r CS1VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs1.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs1.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs1.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+
+### ICES VMS maps Baltic/NS
+
+```{r CS1aMaps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+cs1.data.output_OTH <- cs1.data.output[cs1.data.output$country!='IS',]
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs1.data.output_OTH, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs1.data.output_OTH, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs1.data.output_OTH, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs1.data.output_OTH, land_sf, custom_palette, case_label = "CS1 Northern Gillnets - Baltic/NS")
+
+```
+
+### ICES VMS maps Iceland
+
+```{r CS1bMaps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+cs1.data.output_IS <- cs1.data.output[cs1.data.output$country=='IS',]
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs1.data.output_IS, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs1.data.output_IS, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs1.data.output_IS, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs1.data.output_IS, land_sf, custom_palette, case_label = "CS1 Northern Gillnets - Iceland")
+
+```
+
+## CIBBRiNA Case Study 2: Southern Gillnets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Areas: 27.8.c, 27.9.a
+
+Countries: Spain
+
+### ICES VMS data overview
+
+```{r CS2O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(cs2.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs2.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs2.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+
+### Plots by vessel length
+
+```{r CS2VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs2.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs2.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs2.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### ICES VMS maps
+
+```{r CS2Maps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs2.data.output, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs2.data.output, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs2.data.output, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs2.data.output, land_sf, custom_palette, case_label = "CS2 Southern Gillnets")
+
+```
+
+## CIBBRiNA Case Study 3: UK static nets {.tabset}
+
+Gears: GNC,GND,GNS,GTR,GTN
+
+Countries: United Kingdom
+
+### ICES VMS data overview
+
+```{r CS3O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(cs3.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs3.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs3.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+### Plots by vessel length
+
+```{r CS3VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs3.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs3.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs3.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+
+### ICES VMS maps
+
+```{r CS3Maps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs3.data.output, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs3.data.output, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs3.data.output, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs3.data.output, land_sf, custom_palette, case_label = "CS3 UK static nets")
+
+```
+
+## CIBBRiNA Case Study 6: UK longlines {.tabset}
+
+Gears: LHM,LHP,LLD,LLS,LNB,LTL
+
+Areas: 27.6.a,27.7.b,27.7.j,27.4.a
+
+Countries: United Kingdom
+
+### ICES VMS data overview
+
+```{r CS6O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(cs6.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs6.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs6.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+### Plots by vessel length
+
+```{r CS6VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs6.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs6.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs6.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### ICES VMS maps
+
+```{r CS6Maps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs6.data.output, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs6.data.output, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs6.data.output, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs6.data.output, land_sf, custom_palette, case_label = "CS6 UK longlines")
+
+```
+
+## CIBBRiNA Case Study 7: Pelagic trawl fisheries {.tabset}
+
+Gears: OTM, PTM
+
+Areas: 27.4.a,27.4.b,27.4.c,27.6.a,27.6.b,27.7.a,27.7.b,27.7.c,27.7.d,27.7.e,27.7.f,27.7.g,27.7.h,27.7.j,27.7.k,27.8.a
+
+Case study countries: United Kingdom,Denmark,Ireland,Netherlands
+RDBES data countries: United Kingdom,Denmark,Netherlands
+
+### ICES VMS data overview
+
+```{r CS7O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(cs7.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs7.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs7.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+### Plots by vessel length
+
+```{r CS7VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs7.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs7.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs7.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+### ICES VMS maps
+
+```{r CS7Maps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs7.data.output, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs7.data.output, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs7.data.output, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs7.data.output, land_sf, custom_palette, case_label = "CS Pelagics fisheries")
+
+```
+
+
+## CIBBRiNA Case Study 8: Demersal trawl fisheries in Greater North Sea {.tabset}
+
+Gears: OTB, PTB, TBB
+
+Areas: 27.3.a.20,27.4.b,27.4.c,27.7.d
+
+Case study countries: Belgium,Netherlands
+RDBES data countries: Netherlands
+
+### ICES VMS data overview
+
+```{r CS8O, echo=FALSE, message=FALSE, warning=FALSE}
+
+create_availability_table(cs8.data.output, country, year, "Countries and years with available VMS data")
+create_availability_table(cs8.data.output, country, month, "Countries and month with available VMS data", sort_values = TRUE)
+create_availability_table(cs8.data.output, country, vesselLengthCategory, "Countries and vessel lengths with available VMS data")
+```
+
+### Plots by vessel length
+
+```{r CS8VL, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_length <- aggregate_effort_by_vessel(cs8.data.output, extra_group = "vesselLengthCategory")
+VMS_year_length <- aggregate_effort_by_year(cs8.data.output, extra_group = "vesselLengthCategory")
+VMS_count_length <- count_vessels_per_year(cs8.data.output, extra_group = "vesselLengthCategory")
+VMS_sum1_length <- merge_effort_and_vessels(VMS_year_length, VMS_count_length, by_vars = c("year", "vesselLengthCategory"))
+VMS_sum1_length_masked <- mask_small_vessel_counts(VMS_sum1_length)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_length, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
+
+cat("Note: The barchart below is only showing data where >= 3 vessels")
+
+plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
+
+```
+
+
+### ICES VMS maps
+
+```{r CS8Maps, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+VMS_sum_vid_csq <- aggregate_effort_by_vessel(cs8.data.output, extra_group = "cSquare")
+VMS_year_csq <- aggregate_effort_by_year(cs8.data.output, extra_group = "cSquare")
+VMS_count_csq <- count_vessels_per_year(cs8.data.output, extra_group = "cSquare")
+VMS_sum1_csq <- merge_effort_and_vessels(VMS_year_csq, VMS_count_csq, by_vars = c("year", "cSquare"))
+VMS_sum1_csq_masked <- mask_small_vessel_counts(VMS_sum1_csq)
+
+summary_table <- calculate_vessel_group_percentage(VMS_sum1_csq, vessel_column = "n_vessels", fishing_hours_column = "fishingHours")
+summary_table$total_fishing_hours <- round(as.numeric(summary_table$total_fishing_hours,0)) 
+summary_table$fishing_hours_le3 <- round(summary_table$fishing_hours_le3,0) 
+summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vessels,1) 
+
+names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
+
+kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
+
+
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+
+process_case_study(cs8.data.output, land_sf, custom_palette, case_label = "CS Demersal trawl fisheries")
+
+```
