@@ -94,7 +94,6 @@ write_effort_shapefile <- function(df, fleet_name, year_value, spatial_df, spati
   st_write(merged, output_path, delete_dsn = TRUE, quiet = TRUE)
 }
 
-
 plot_fleet_index_var <- function(df, fleet_name, varname, base_year = 2013, title_prefix = "") {
   df_filtered <- df %>% filter(CSfleet == fleet_name)
   
@@ -117,7 +116,7 @@ plot_fleet_index_var <- function(df, fleet_name, varname, base_year = 2013, titl
       sec.axis = sec_axis(~ . * max(df_filtered$Index, na.rm = TRUE) / max(df_filtered[[varname]], na.rm = TRUE),
                           name = paste0("Index (", base_year, " = 100)"))
     ) +
-    labs(title = paste("FDI effort -", title_prefix, fleet_name),
+    labs(title = paste("1. FDI effort -", title_prefix, fleet_name),
          x = "Year", y = varname) +
     theme_minimal() +
     theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
@@ -505,10 +504,77 @@ plot_area_effort_paginated <- function(df, fleet_name, varname = "Total.Fishing.
     return(plots)
   }
   
+plot_fishing_effort_map <- function(year, effort_data) {
+  # Filter data for the selected year
+  effort_year <- effort_data[effort_data$Year == year, ]
+  
+  effort_year <- merge(effort_year, area2, by = "area", all.x = TRUE)
+  
+  # Convert to sf if not already
+  if (!inherits(effort_year, "sf")) {
+    effort_year <- st_as_sf(effort_year)
+  }
+  
+  # Transform land layer to match CRS
+  land_sf_transformed <- st_transform(land_sf, st_crs(effort_year))
+  
+  # Get bounding box
+  bbox <- st_bbox(effort_year)
+  
+  # Plot
+  ggplot() +
+    geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +
+    geom_sf(data = effort_year, aes(fill = FishingDays), color = "light grey", size = 0.2) +
+    scale_fill_gradientn(colors = custom_palette, name = "Fishing Days") +
+    coord_sf(
+      xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
+      ylim = c(as.numeric(bbox["ymin"]), as.numeric(bbox["ymax"])),
+      expand = FALSE
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("FDI Fishing Days by Area (", year, ")", sep = "")
+    )
+}
+
+plot_fishing_rect_map <- function(year, rect_data) {
+  # Filter data for the selected year
+  rect_year <- rect_data[rect_data$year == year, ]
+  
+  rect_year <- merge(rect_year, rect, by = "icesname", all.x = TRUE)
+  
+  # Convert to sf if not already
+  if (!inherits(rect_year, "sf")) {
+    rect_year <- st_as_sf(rect_year)
+  }
+  
+  # Transform land layer to match CRS
+  land_sf_transformed <- st_transform(land_sf, st_crs(rect_year))
+  
+  # Get bounding box
+  bbox <- st_bbox(rect_year)
+  
+  # Plot
+  ggplot() +
+    geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +
+    geom_sf(data = rect_year, aes(fill = fishDays), color = "light grey", size = 0.2) +
+    scale_fill_gradientn(colors = custom_palette, name = "Fishing Days") +
+    coord_sf(
+      xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
+      ylim = c(as.numeric(bbox["ymin"]), as.numeric(bbox["ymax"])),
+      expand = FALSE
+    ) +
+    theme_minimal() +
+    labs(
+      title = paste("FDI Fishing Days by rectangle (", year, ")", sep = "")
+    )
+}
+
+
 ```
 
 
-```{r source, message = FALSE, warning = FALSE}
+```{r source, message = FALSE, warning = FALSE, results='hide'}
 datapath <- "Q:\\20-forskning\\20-dfad\\data\\Data\\FDI_data_dissemination\\2024 DC\\"
 
 # Read FDI effort data
@@ -542,15 +608,22 @@ rect <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\B
 rect$icesname <- rect$ICESNAME
 rect <- subset(rect, select=c(icesname, geometry))
 
+capture.output({
+  land_sf <- sf::st_read("Q:/50-radgivning/02-mynd/Josefine/GIS/Kystlinie.shp")
+}, file = NULL)
+
+
 ```
 
-## FDI effort data for CIBBRiNA
+## FDI effort data for CIBBRiNA {.tabset}
+
+### Overview
 
 Public data from EU STECF Fisheries Dependent Information data call are downloaded from: https://stecf.ec.europa.eu/data-dissemination/fdi_en
 
 Data are filtered to match the CIBBRiNA case studies. Only case studies where it makes sense to extract from FDI are included:
 
-The fleet definitions should be validated by CS leads that the selection based on “country*gear*area*(deep)” is appropriate and relevant for their case study. Some may need a more precise selection — for example, by using DCF Métiers at Level 5 or 6, or by including vessel length ranges.
+The fleet definitions should be validated by CS leads that the selection based on “country * gear * area * (deep)” is appropriate and relevant for their case study. Some may need a more precise selection — for example, by using DCF Métiers at Level 5 or 6, or by including vessel length ranges.
 
  * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany. Norway and Iceland does not report to the EU FDI data call
  * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
@@ -560,6 +633,28 @@ The fleet definitions should be validated by CS leads that the selection based o
  * Case study 6: UK longlines - UK data only available until 2020.
  * Case study 7: Pelagic trawl fisheries - included
  * Case study 8: Demersal trawl fisheries in Greater North Sea - Belgium and the Netherlands
+
+
+### FDI readme rectangle data
+
+The files published here contain spatial effort (fishing days) and landings data (weight in tonnes and value in euro) collected in the context of the DCF Fisheries Dependent Information (FDI) data calls and disseminated accordingly to the format proposed during the STECF EWGs 19-11, 20-10, 21-10 and 21-12.
+For details please refer to the reports from the STECF EWG 19-11 (paragraph 3.4, table 3.4.1.1), 20-10 (paragraph 3.3.1) and 21-12 (paragraph 3.3).
+
+Spatial effort and landings data are disseminated as CSV files; spatial files can be produced by joining the CSV tables with the c-squares dataset included.
+Two datasets are provided: one for EU27 (excluding the United Kingdom) and one for EU28 (including the United Kingdom and with United Kingdom data only available for years 2014-2020).
+
+Detailed information about the data types and formats of the FDI data call is available on the DCF website
+https://dcf.ec.europa.eu/data-calls.
+Please note that, the spatial data for Mediterranean and Black Sea areas are available only from year 2017 onwards (for the previous years, some Member States provided spatial data on a voluntary basis).
+
+Information about the quality of the data provided by Member States can be found in the report from the STECF EWG 24-11 available at https://stecf.ec.europa.eu/reports/fisheries-dependent-information-reports
+
+Please note that, to ensure consistency, data with the following issues were excluded from the dataset:
+- data with c-square or geographical coordinates not contained in the specified sub-region
+- data with inconsistent combination of geographical coordinates and rectangle type
+and in addition:
+- data from Portugal marked as confidential in the supra-region OFR were excluded as requested by the STECF EWGs 20-10 and 19-11
+- a series of c-squares with confidential records were omitted from the final dataset upon request from Netherlands and Portugal.
 
 
 ```{r fleets}
@@ -695,6 +790,16 @@ vessel_length_colors_reduced <- c(
   "VL1824" = "#08306b", "VL2440" = "#6a51a3", "VL40XX" = "#4a1486"
 )
 
+
+# Define custom color palette
+custom_palette <- c(
+  "#f5f5dc",  # very light beige
+  "#ffa500",  # orange
+  "#ff0000",  # red
+  "#8b0000",  # dark red
+  "#5c4033"   # dark brown
+)
+
 ```
 
 
@@ -716,21 +821,19 @@ effort_rect2 <- effort_rect1 %>%
   summarize(fishDays = sum(totfishdays, na.rm = TRUE), .groups = "drop")
 
 # List relevant CS-fleets and output-path
-csfleets <- c("CS1_Gillnet_North", "CS2_Gillnet_South", "CS4_Longlines_DEEP_PRT", "CS7_Pelagic_trawl", "CS8_Demersal_trawl")
-year_target <- 2023
-output_dir <- "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/shp"
+#csfleets <- c("CS1_Gillnet_North", "CS2_Gillnet_South", "CS4_Longlines_DEEP_PRT", "CS7_Pelagic_trawl", #"CS8_Demersal_trawl")
+#year_target <- 2023
+#output_dir <- "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/shp"
 
 # Loop: EU area shapefiles
-for (fleet in csfleets) {
-  write_effort_shapefile(FDI_area, fleet, year_target, area, "area", output_dir, "area", year_col = "Year")
-}
+#for (fleet in csfleets) {
+#  write_effort_shapefile(FDI_area, fleet, year_target, area, "area", output_dir, "area", year_col = "Year")
+#}
 
 # Loop: Rectangle shapefiles
-for (fleet in csfleets) {
-  write_effort_shapefile(effort_rect2, fleet, year_target, rect, "icesname", output_dir, "rect", year_col = "year")
-}
-
-
+#for (fleet in csfleets) {
+#  write_effort_shapefile(effort_rect2, fleet, year_target, rect, "icesname", output_dir, "rect", year_col = "year")
+#}
 
 ```
 
@@ -846,7 +949,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS1_Gillnet_North", "kWFishDa
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS1nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS1_Gillnet_North", chart_type = ct))
 }
@@ -860,9 +963,7 @@ Plots 1 and 2 are showing the fishing days by vessel length categories within CS
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
 
@@ -883,13 +984,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS1FDVLG, fig.dim= c(6, 4)}
@@ -906,19 +1005,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS1FDMet, fig.dim= c(6, 4)}
@@ -950,19 +1045,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS1FDMet5, fig.dim= c(6, 4)}
@@ -993,19 +1084,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS1FDMet4, fig.dim= c(6, 4)}
@@ -1047,15 +1132,10 @@ plot_quarterly_effort(effort_MS2, "CS1_Gillnet_North", "Total.Fishing.Days", tit
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS1A, fig.dim= c(6, 4)}
-#plots_area <- plot_area_effort(effort_EU2, "CS1_Gillnet_North", title_prefix = "EU")
-#print(plots_area[[1]])
-#print(plots_area[[2]])
-
 plots_area_vl <- plot_area_effort(effort_EU2, "CS1_Gillnet_North", group_var = "Vessel.Length.Category", title_prefix = "EU by Vessel Length")
 print(plots_area_vl[[1]])
 print(plots_area_vl[[2]])
@@ -1065,21 +1145,35 @@ print(plots_area_metier[[1]])
 print(plots_area_metier[[2]])
 ```
 
-### Maps
+### Maps Area
 
-Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+```{r CS1area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
 
-```{r CS1area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS1 Northern gillnet effort, ICES areas (2023)"}
+cat("The maps below are showing EU fishing effort by area")
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS1_FDI_EU_gillnets_2023_area.png")
+FDI_area_CS <- FDI_area[FDI_area$CSfleet=='CS1_Gillnet_North',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_effort_map(y, FDI_area_CS))
+}
+
+```
+
+
+### Maps Rectangle
+
+```{r CS1rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+cat("The maps below are showing EU fishing effort by ICES rectangle")
+
+FDI_rect_CS <- effort_rect2[effort_rect2$CSfleet=='CS1_Gillnet_North',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_rect_map(y, FDI_rect_CS ))
+}
 
 ```
 
-```{r CS1rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS1 Northern gillnet effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
-
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS1_FDI_EU_gillnets_2023_rectangle.png")
-
-```
 
 ## CIBBRiNA Case Study 2: Southern Gillnets {.tabset}
 
@@ -1196,7 +1290,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS2_Gillnet_South", "kWFishDa
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS2nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS2_Gillnet_South", chart_type = ct))
 }
@@ -1210,7 +1304,7 @@ Plots 1 and 2 are showing the fishing days by vessel length categories within CS
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS2FDVL, fig.dim= c(6, 4)}
@@ -1229,9 +1323,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS2FDVLG, fig.dim= c(6, 4)}
@@ -1247,17 +1343,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS2FDMet, fig.dim= c(6, 4)}
@@ -1294,17 +1388,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS2FDMet5, fig.dim= c(6, 4)}
@@ -1335,19 +1427,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS2FDMet4, fig.dim= c(6, 4)}
@@ -1388,9 +1474,8 @@ plot_quarterly_effort(effort_MS2, "CS2_Gillnet_South", "Total.Fishing.Days", tit
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS2A, fig.dim= c(6, 4)}
 #plots_area <- plot_area_effort(effort_EU2, "CS2_Gillnet_South", title_prefix = "EU")
@@ -1401,25 +1486,38 @@ plots_area_vl <- plot_area_effort(effort_EU2, "CS2_Gillnet_South", group_var = "
 print(plots_area_vl[[1]])
 print(plots_area_vl[[2]])
 
-plots_area_metier <- plot_area_effort(effort_EU2, "CS2_Gillnet_Sout", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
+plots_area_metier <- plot_area_effort(effort_EU2, "CS2_Gillnet_South", group_var = "Metier", title_prefix = "EU by Metier", top_n = 10)
 print(plots_area_metier[[1]])
 print(plots_area_metier[[2]])
 
 ```
 
-### Maps
+### Maps Area
 
-Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+```{r CS2area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
 
-```{r CS2area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS2 Southern gillnet effort, ICES areas (2023)"}
+cat("The maps below are showing EU fishing effort by area")
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS2_FDI_EU_gillnets_2023_area.png")
+FDI_area_CS <- FDI_area[FDI_area$CSfleet=='CS2_Gillnet_South',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_effort_map(y, FDI_area_CS))
+}
 
 ```
 
-```{r CS2rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS2 Southern gillnet effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS2_FDI_EU_gillnets_2023_rectangle.png")
+### Maps Rectangle
+
+```{r CS2rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+cat("The maps below are showing EU fishing effort by ICES rectangle")
+
+FDI_rect_CS <- effort_rect2[effort_rect2$CSfleet=='CS2_Gillnet_South',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_rect_map(y, FDI_rect_CS ))
+}
 
 ```
 
@@ -1528,15 +1626,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at country level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS3FDMet, fig.dim= c(6, 4)}
@@ -1557,15 +1655,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at country level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS3FDMet5, fig.dim= c(6, 4)}
@@ -1586,15 +1684,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at country level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS3FDMet4, fig.dim= c(6, 4)}
@@ -1624,9 +1720,8 @@ plot_quarterly_effort(effort_MS2, "CS3_Gillnet_UK", "Total.Fishing.Days", title_
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plot 1 is split in 3 parts and shows fishing days per vessel length and area. 
+Plot 2 is split in 3 parts and shows fishing days per top 10 métier level 6 and area.
 
 ```{r CS3A, fig.dim= c(6, 4)}
 plots_area_vl <- plot_area_effort_paginated(effort_MS2, "CS3_Gillnet_UK", group_var = "Vessel.Length.Category", title_prefix = "MS by Vessel Length", ncol = 3, nrow = 3)
@@ -1644,6 +1739,8 @@ for (p in plots_area_metier) {
 }
 
 ```
+
+
 
 ## CIBBRiNA Case Study 4: Deepwater longlines in Portuguese waters {.tabset}
 
@@ -1761,7 +1858,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS4_Longlines_DEEP_PRT", "kWF
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS4nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS4_Longlines_DEEP_PRT", chart_type = ct))
 }
@@ -1775,7 +1872,7 @@ Plots 1 and 2 are showing the fishing days by vessel length categories within CS
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS4FDVL, fig.dim= c(6, 4)}
@@ -1793,9 +1890,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS4FDVLG, fig.dim= c(6, 4)}
@@ -1811,17 +1910,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS4FDMet, fig.dim= c(6, 4)}
@@ -1852,17 +1949,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS4FDMet5, fig.dim= c(6, 4)}
@@ -1893,17 +1988,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS4FDMet4, fig.dim= c(6, 4)}
@@ -1944,9 +2035,8 @@ plot_quarterly_effort(effort_MS2, "CS4_Longlines_DEEP_PRT", "Total.Fishing.Days"
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS4A, fig.dim= c(6, 4)}
 #plots_area <- plot_area_effort(effort_EU2, "CS4_Longlines_DEEP_PRT", title_prefix = "EU")
@@ -1963,21 +2053,21 @@ print(plots_area_metier[[2]])
 
 ```
 
-### Maps
+### Maps Area
 
-Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+```{r CS4area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
 
-```{r CS4area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS4 Longlines effort, ICES areas (2023)"}
+cat("The maps below are showing EU fishing effort by area")
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS4_FDI_EU_longlines_2023_area.png")
+FDI_area_CS <- FDI_area[FDI_area$CSfleet=='CS4_Longlines_DEEP_PRT',]
 
-```
-
-```{r CS4rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS4 Longlines effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
-
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS4_FDI_EU_longlines_2023_rectangle.png")
+for (y in 2013:2023) {
+  print(plot_fishing_effort_map(y, FDI_area_CS))
+}
 
 ```
+
+
 
 ## CIBBRiNA Case Study 5: Surface longlines in Madeira waters {.tabset}
 
@@ -2095,7 +2185,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS5_Surface_Longlines_Madeira
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS5nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS5_Surface_Longlines_Madeira", chart_type = ct))
 }
@@ -2108,6 +2198,8 @@ for (ct in chart_types) {
 Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS5FDVL, fig.dim= c(6, 4)}
@@ -2126,9 +2218,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
+
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS5FDVLG, fig.dim= c(6, 4)}
@@ -2145,17 +2239,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS5FDMet, fig.dim= c(6, 4)}
@@ -2186,18 +2278,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
-
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 ```{r CS5FDMet5, fig.dim= c(6, 4)}
 # Combine top metiers from both datasets
@@ -2227,17 +2316,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS5FDMet4, fig.dim= c(6, 4)}
@@ -2279,9 +2364,8 @@ plot_quarterly_effort(effort_MS2, "CS5_Surface_Longlines_Madeira", "Total.Fishin
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS5A, fig.dim= c(6, 4)}
 #plots_area <- plot_area_effort(effort_EU2, "CS5_Surface_Longlines_Madeira", title_prefix = "EU")
@@ -2297,6 +2381,7 @@ print(plots_area_metier[[1]])
 print(plots_area_metier[[2]])
 
 ```
+
 
 ## CIBBRiNA Case Study 6: UK longlines {.tabset}
 
@@ -2404,15 +2489,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at country level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS6FDMet, fig.dim= c(6, 4)}
@@ -2433,15 +2518,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at country level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS6FDMet5, fig.dim= c(6, 4)}
@@ -2462,15 +2547,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at country level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS6FDMet4, fig.dim= c(6, 4)}
@@ -2501,9 +2584,8 @@ plot_quarterly_effort(effort_MS2, "CS6_Longlines_UK", "Total.Fishing.Days", titl
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS6A, fig.dim= c(6, 4)}
 #plots_area <- plot_area_effort(effort_MS2, "CS6_Longlines_UK", title_prefix = "MS")
@@ -2634,7 +2716,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS7_Pelagic_trawl", "kWFishDa
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS7nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS7_Pelagic_trawl", chart_type = ct))
 }
@@ -2648,12 +2730,7 @@ Plots 1 and 2 are showing the fishing days by vessel length categories within CS
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
-
-Note that after 2021, there was a requirement to report the vessel length in group 0-8 m in the Baltic, and 0-10 m in other areas. In the other years the vessel length category to report was 0-10 m.
-
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 ```{r CS7FDVL, fig.dim= c(6, 4)}
 plots_EU <- plot_fleet_by_length(effort_EU2, "CS7_Pelagic_trawl", "Vessel.Length.Category", "Total.Fishing.Days", title_prefix = "EU")
@@ -2670,14 +2747,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
-
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 ```{r CS7FDVLG, fig.dim= c(6, 4)}
 plots_EU <- plot_fleet_by_length(effort_EU2, "CS7_Pelagic_trawl", "VL_GR", "Total.Fishing.Days", title_prefix = "EU")
@@ -2693,19 +2767,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS7FDMet, fig.dim= c(6, 4)}
@@ -2741,19 +2811,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS7FDMet5, fig.dim= c(6, 4)}
@@ -2784,19 +2850,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS7FDMet4, fig.dim= c(6, 4)}
@@ -2839,9 +2899,8 @@ plot_quarterly_effort(effort_MS2, "CS7_Pelagic_trawl", "Total.Fishing.Days", tit
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS7A, fig.dim= c(6, 4)}
 plots_area_vl <- plot_area_effort_paginated(effort_MS2, "CS7_Pelagic_trawl", group_var = "Vessel.Length.Category", title_prefix = "MS by Vessel Length", ncol = 3, nrow = 3)
@@ -2860,19 +2919,32 @@ for (p in plots_area_metier) {
 
 ```
 
-### Maps
+### Maps Area
 
-Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+```{r CS7area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
 
-```{r CS7area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS7 Pelagic trawl effort, ICES areas (2023)"}
+cat("The maps below are showing EU fishing effort by area")
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS7_FDI_EU_pelagic_trawl_2023_area.png")
+FDI_area_CS <- FDI_area[FDI_area$CSfleet=='CS7_Pelagic_trawl',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_effort_map(y, FDI_area_CS))
+}
 
 ```
 
-```{r CS7rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS7 Pelagic trawl effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS7_FDI_EU_pelagic_trawl_2023_rectangle.png")
+### Maps Rectangle
+
+```{r CS7rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+cat("The maps below are showing EU fishing effort by ICES rectangle")
+
+FDI_rect_CS <- effort_rect2[effort_rect2$CSfleet=='CS7_Pelagic_trawl',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_rect_map(y, FDI_rect_CS ))
+}
 
 ```
  
@@ -2990,7 +3062,7 @@ plots2 <- plot_fleet_MS_tot_var(FDI_fleet_MS_tot, "CS8_Demersal_trawl", "kWFishD
 Number of rows marked as confidential by country and year in the FDI effort table (G). The CS is selected without countries to reflect the dataset that is available on EU level. 
 
 ```{r CS8nConf, fig.dim= c(6, 4)}
-chart_types <- c("bar", "stacked", "heatmap", "bubble")
+chart_types <- c("bar", "stacked", "bubble")
 for (ct in chart_types) {
   print(plot_confidential(FDI_rows_confidential, "CS8_Demersal_trawl", chart_type = ct))
 }
@@ -3003,9 +3075,7 @@ Plots 1 and 2 are showing the fishing days by vessel length categories within CS
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS8FDVL, fig.dim= c(6, 4)}
@@ -3023,13 +3093,11 @@ print(plots_MS[[2]])
 
 In these plots the vessels below 12 m have been grouped, to avoid overlapping vesse length ranges.
 
-Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level. 
+Plots 1 and 2 are showing the fishing days by vessel length categories within CS fleet at EU level (total and as percentage). 
 
 Plot 3 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is not fixed. 
 
-Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-Plot 5 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
+Plot 4 is showing the fishing days by vessel length categories within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS8FDVLG, fig.dim= c(6, 4)}
@@ -3044,19 +3112,15 @@ print(plots_MS[[2]])
 
 ### Metier level 6
 
-The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'_'Mesh size range'_'Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 6 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage_Mesh size range_Selection devices'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
 As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 6 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS8FDMet, fig.dim= c(6, 4)}
@@ -3092,19 +3156,15 @@ print(plots_MS[[2]])
 
 ### Metier level 5
 
-The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 5 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear_Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+As there are minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
 
-The first plot is showing the fishing days by metier level 5 within CS fleet at EU level. 
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The second plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS8FDMet5, fig.dim= c(6, 4)}
@@ -3135,19 +3195,13 @@ print(plots_MS[[2]])
 
 ### Metier level 4
 
-The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code has the components 'Gear'_'Target species assemblage'. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
+The metier level 4 is defined in the DCF EU-MAP and is managed by the RCG ISSG Metier and transversal variables, and used for reporting in FDI and ICES data calls. The code is the first part of the métier level 6 code. See more documentation at: https://github.com/ices-eg/RCGs/tree/master/Metiers.
 
 Note: There can be a difference between the gears reported in the GEAR_TYPE variable and in the Metier code on level 4.
 
-As there are many minor metier codes, only the top 10 metier codes by fishing days are shown in the plot below, the rest are grouped into 'Other'.
+The first plot is showing the fishing days by metier level 6 within CS fleet at EU level, and in the second plot the metier distribution is illustrated as percentage. 
 
-The first plot is showing the fishing days by metier level 4 within CS fleet at EU level. 
-
-The second plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is not fixed. 
-
-The third plot is showing the fishing days by metier level 4 within CS fleet at country level, where the y-axis is fixed, so it is easier to get an overview of the relative fishing effort by MS. 
-
-The fourth plot is showing the fishing days by metier level 5 within CS fleet at country level, where the y-axis is shown as percentage.
+The third plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is not fixed The fourth plot is showing the fishing days by metier level 6 within CS fleet at country level, where the y-axis is shown as percentage.
 
 
 ```{r CS8FDMet4, fig.dim= c(6, 4)}
@@ -3189,9 +3243,8 @@ plot_quarterly_effort(effort_MS2, "CS8_Demersal_trawl", "Total.Fishing.Days", ti
 ### Area
 
 Plots of fishing days by areas. 
-Plot 1 shows fishing days per year and area.
-Plots 2, 3 and 4 shows fishing days per vessel length and area. 2 as total, 3 with fixed y-axis and 4 as percentage.
-Plots 5 and 6 shows fishing days per top 10 métier level 6 and area, as total and percentage.
+Plots 1, and 2 shows fishing days per vessel length and area. 1 as total and 2 as percentage.
+Plots 3 and 4 shows fishing days per top 10 métier level 6 and area, as total and percentage.
 
 ```{r CS8A, fig.dim= c(6, 4)}
 #plots_area <- plot_area_effort(effort_EU2, "CS8_Demersal_trawl", title_prefix = "EU")
@@ -3208,18 +3261,30 @@ print(plots_area_metier[[2]])
 
 ```
 
-### Maps
+### Maps Area
 
-Maps by area and rectangle. Please note that the map showing effort by rectangle is not complste, as it does not include effort maked as confidential by MS.
+```{r CS8area, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
 
-```{r CS8area, , echo=FALSE, out.width="80%", fig.cap="1. FDI EU CS8 Demersal trawl effort, ICES areas (2023)"}
+cat("The maps below are showing EU fishing effort by area")
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS8_FDI_EU_demersal_trawl_2023_area.png")
+FDI_area_CS <- FDI_area[FDI_area$CSfleet=='CS8_Demersal_trawl',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_effort_map(y, FDI_area_CS))
+}
 
 ```
 
-```{r CS8rect, , echo=FALSE, out.width="80%", fig.cap="2. FDI EU CS8 Demersal trawl effort, ICES rectangles (2023). Please note that the effort by rectangle is not complete, as it does not include effort marked as confidential by MS"}
+### Maps Rectangle
 
-knitr::include_graphics("Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/maps/CS8_FDI_EU_demersal_trawl_2023_rectangle.png")
+```{r CS8rect, echo=FALSE, message=FALSE, warning=FALSE, results='asis'}
+
+cat("The maps below are showing EU fishing effort by ICES rectangle")
+
+FDI_rect_CS <- effort_rect2[effort_rect2$CSfleet=='CS8_Demersal_trawl',]
+
+for (y in 2013:2023) {
+  print(plot_fishing_rect_map(y, FDI_rect_CS ))
+}
 
 ```
