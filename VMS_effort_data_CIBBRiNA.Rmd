@@ -313,7 +313,7 @@ A letter was sent from the CIBBRiNA project lead to the National Correspondents 
 
 For most MS CIBBRiNA are granted permission to use the data for the purpose of the project, under the conditions that confidentiality restrictions specified in responses, in the RDBES data license and in the 'Conditions of use' document that is signed by experts with access to the data. Three member states did not grant permission for the project to get the data directly from ICES, but would like to run the script on national data and only share outputs.
 
-The outputs in this html file is giving overview of data availability and quality, and is showing only data values if there are more than 3 vessels (>=3).
+The outputs in this html file is giving overview of data availability and quality, and is showing only data values if there are more than 3 vessels (>3).
 
  * Case study 1: Northern Gillnets - included for Sweden, Denmark, Poland and Germany.
  * Case study 2: Southern Gillnets - Gillnets from Spain are included, areas 8.C and 9.A
@@ -472,7 +472,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 
 kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
 
-cat("Note: The barchart below is only showing data where >= 3 vessels")
+cat("Note: The barchart below is only showing data where > 3 vessels")
 
 plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
 
@@ -500,7 +500,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs1.data.output_OTH, land_sf, custom_palette, case_label = "CS1 Northern Gillnets - Baltic/NS")
 
@@ -527,7 +527,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs1.data.output_IS, land_sf, custom_palette, case_label = "CS1 Northern Gillnets - Iceland")
 
@@ -593,7 +593,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs2.data.output, land_sf, custom_palette, case_label = "CS2 Southern Gillnets")
 
@@ -631,7 +631,7 @@ summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vesse
 names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
 kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
 
-cat("Note: The barchart below is only showing data where >= 3 vessels")
+cat("Note: The barchart below is only showing data where > 3 vessels")
 
 plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
 
@@ -657,7 +657,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs3.data.output, land_sf, custom_palette, case_label = "CS3 UK static nets")
 
@@ -698,7 +698,7 @@ summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vesse
 names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
 kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
 
-cat("Note: The barchart below is only showing data where >= 3 vessels")
+cat("Note: The barchart below is only showing data where > 3 vessels")
 
 plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
 
@@ -724,7 +724,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs6.data.output, land_sf, custom_palette, case_label = "CS6 UK longlines")
 
@@ -766,7 +766,7 @@ summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vesse
 names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
 kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
 
-cat("Note: The barchart below is only showing data where >= 3 vessels")
+cat("Note: The barchart below is only showing data where > 3 vessels")
 
 plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
 
@@ -792,7 +792,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs7.data.output, land_sf, custom_palette, case_label = "CS Pelagics fisheries")
 
@@ -835,7 +835,7 @@ summary_table$percentage_le3_vessels <- round(summary_table$percentage_le3_vesse
 names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessels", "% fishing hours <=3 vessels")
 kable(summary_table, caption = "Percent of fishing hours (by year and vessel length category) that comes from rows with <=3 vessels")
 
-cat("Note: The barchart below is only showing data where >= 3 vessels")
+cat("Note: The barchart below is only showing data where > 3 vessels")
 
 plot_effort_metric(VMS_sum1_length_masked , "fishingHours", "VMS fishing hours" , "VMS fishing hours" ,fill_var = "vesselLengthCategory", color_scheme =vessel_length_colors)
 
@@ -862,7 +862,7 @@ names(summary_table) <- c("Year","Total fishing hours","Fishing hours <=3 vessel
 kable(summary_table, caption = "Percent of fishing hours (by year and c-square) that comes from rows with <=3 vessels")
 
 
-cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with less than or equal 3 vessels in the case study fleet by c-square and year.")
+cat("The maps are showing ICES VMS fishing hours by c-square (0.05 * 0.05 degrees) for the case study fleet per year (2021-2024). The values are only shown if there are more than 3 vessels, else the cell is coloured as grey. The bar chart below the maps is indicating the part of the fishing hours with 3 or less vessels in the case study fleet by c-square and year.")
 
 process_case_study(cs8.data.output, land_sf, custom_palette, case_label = "CS Demersal trawl fisheries")
 
