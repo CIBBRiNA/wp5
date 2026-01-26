@@ -185,7 +185,7 @@ mask_small_vessel_counts <- function(data, threshold = 3) {
   
   # Apply masking
   data %>%
-    mutate(across(all_of(cols_to_mask), ~ ifelse(n_vessels <= threshold, NA, .)))
+    mutate(across(all_of(cols_to_mask), ~ ifelse(n_vessels < threshold, NA, .)))
 }
 
 summarize_sensitive_contribution_by_year <- function(data, threshold = 3) {
@@ -193,13 +193,14 @@ summarize_sensitive_contribution_by_year <- function(data, threshold = 3) {
   numeric_cols <- names(data)[sapply(data, is.numeric) & !(names(data) %in% c("CEyear", "n_vessels"))]
   
   # Group by year and calculate percentages
-  summary <- data %>%
-    group_by(CEyear) %>%
-    summarise(across(all_of(numeric_cols), ~ {
-      total <- sum(.x, na.rm = TRUE)
-      sensitive <- sum(.x[data$n_vessels <= threshold & data$CEyear == cur_group()$CEyear], na.rm = TRUE)
-      if (total > 0) round(100 * sensitive / total, 2) else NA
-    }), .groups = "drop")
+summary <- data %>%
+  group_by(CEyear) %>%
+  summarise(across(all_of(numeric_cols), ~ {
+    total <- sum(.x, na.rm = TRUE)
+    sensitive <- sum(.x[cur_data()$n_vessels < threshold], na.rm = TRUE)
+    if (total > 0) round(100 * sensitive / total, 2) else NA
+  }), .groups = "drop")
+
   
   return(summary)
 }
@@ -220,10 +221,12 @@ plot_fishing_effort_map <- function(year, effort_data) {
   # Get bounding box
   bbox <- st_bbox(effort_year)
   
+  effort_year1 <- effort_year[!(is.na(effort_year$CEscientificFishingDays)),]
+  
   # Plot
   ggplot() +
     geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +
-    geom_sf(data = effort_year, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
+    geom_sf(data = effort_year1, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
     scale_fill_gradientn(colors = custom_palette, name = "Scientific Fishing Days") +
     coord_sf(
       xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
@@ -252,10 +255,13 @@ plot_fishing_effort_rect_map <- function(year, effort_data) {
   # Get bounding box
   bbox <- st_bbox(effort_year)
   
+  effort_year1 <- effort_year[!(is.na(effort_year$CEscientificFishingDays)),]
+  
+  
   # Plot with land layer on top
   ggplot() +
-    geom_sf(data = effort_year, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
     geom_sf(data = land_sf_transformed, fill = "grey95", color = NA) +  # land layer on top
+    geom_sf(data = effort_year1, aes(fill = CEscientificFishingDays), color = "light grey", size = 0.2) +
     scale_fill_gradientn(colors = custom_palette, name = "Scientific Fishing Days") +
     coord_sf(
       xlim = c(as.numeric(bbox["xmin"]), as.numeric(bbox["xmax"])),
@@ -478,9 +484,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -517,9 +523,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs1, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -556,9 +562,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs1, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -595,9 +601,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs1, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -634,9 +640,9 @@ vessel_count_area <- count_vessels_per_year(effort_cs1, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
  
@@ -659,11 +665,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs1, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
  
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
@@ -711,9 +717,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -738,9 +744,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs2, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -765,9 +771,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs2, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -792,9 +798,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs2, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -819,11 +825,11 @@ vessel_count_area <- count_vessels_per_year(effort_cs2, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
  
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
  
@@ -844,11 +850,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs2, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
  
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map") 
 
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
@@ -892,9 +898,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -919,9 +925,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs3, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -946,9 +952,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs3, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -973,9 +979,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs3, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -1000,11 +1006,11 @@ vessel_count_area <- count_vessels_per_year(effort_cs3, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
  
 plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
  
@@ -1025,11 +1031,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs3, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
@@ -1075,9 +1081,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -1102,9 +1108,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs6, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -1129,9 +1135,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs6, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -1156,9 +1162,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs6, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -1183,11 +1189,11 @@ vessel_count_area <- count_vessels_per_year(effort_cs6, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
  
 plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
  
@@ -1208,11 +1214,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs6, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
  
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
@@ -1259,9 +1265,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -1298,9 +1304,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs7, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -1337,9 +1343,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs7, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -1376,9 +1382,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs7, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -1415,11 +1421,11 @@ vessel_count_area <- count_vessels_per_year(effort_cs8, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
  
 plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
  
@@ -1440,11 +1446,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs7, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
@@ -1491,9 +1497,9 @@ CE_vid1 <- count_vessels_per_year(effort_sum_vid)
 effort_sum1 <- merge_effort_and_vessels(effort_sum, CE_vid1)
 effort_sum1_masked <- mask_small_vessel_counts(effort_sum1)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_masked, "CEscientificDaysAtSea", "Total Days at Sea per Year", "Scientific Days at Sea")
@@ -1530,9 +1536,9 @@ vessel_count_country <- count_vessels_per_year(effort_cs8, extra_group = "CEvess
 effort_sum1_country <- merge_effort_and_vessels(effort_year_country, vessel_count_country, by_vars = c("CEyear", "CEvesselFlagCountry"))
 effort_sum1_country_masked <- mask_small_vessel_counts(effort_sum1_country)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_country )
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_country_masked , "CEscientificDaysAtSea", "Total Days at Sea by country", "Days at Sea", fill_var = "CEvesselFlagCountry", color_scheme = country_colors)
@@ -1569,9 +1575,9 @@ vessel_count_length <- count_vessels_per_year(effort_cs8, extra_group = "CEvesse
 effort_sum1_length <- merge_effort_and_vessels(effort_year_length, vessel_count_length, by_vars = c("CEyear", "CEvesselLengthCategory"))
 effort_sum1_length_masked <- mask_small_vessel_counts(effort_sum1_length)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_length)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_length_masked , "CEscientificDaysAtSea", "Total Days at sea by vessel length", "Days at Sea", fill_var = "CEvesselLengthCategory", color_scheme =vessel_length_colors)
@@ -1608,9 +1614,9 @@ vessel_count_gear <- count_vessels_per_year(effort_cs8, extra_group = "Gear_lvl4
 effort_sum1_gear <- merge_effort_and_vessels(effort_year_gear, vessel_count_gear, by_vars = c("CEyear", "Gear_lvl4"))
 effort_sum1_gear_masked <- mask_small_vessel_counts(effort_sum1_gear)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_gear)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
-cat("Note: The barcharts below are only showing data where > 3 vessels")
+cat("Note: The barcharts below are only showing data where >= 3 vessels")
 
 # Plot scientific days at sea
 plot_effort_metric(effort_sum1_gear_masked , "CEscientificDaysAtSea", "Total Days at Sea by gear", "Days at Sea", fill_var = "Gear_lvl4", color_scheme =gear_colors)
@@ -1647,11 +1653,11 @@ vessel_count_area <- count_vessels_per_year(effort_cs8, extra_group = "CEarea")
 effort_sum1_area <- merge_effort_and_vessels(effort_year_area, vessel_count_area, by_vars = c("CEyear", "CEarea"))
 effort_sum1_area_masked <- mask_small_vessel_counts(effort_sum1_area)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_area)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_area_masked_geo <- merge(effort_sum1_area_masked, area2, by = "CEarea", all.x = TRUE)
  
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the area is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 plot_fishing_effort_map(2021, effort_sum1_area_masked_geo)
  
@@ -1672,11 +1678,11 @@ vessel_count_rect <- count_vessels_per_year(effort_cs8, extra_group = "CEstatist
 effort_sum1_rect <- merge_effort_and_vessels(effort_year_rect, vessel_count_rect, by_vars = c("CEyear", "CEstatisticalRectangle"))
 effort_sum1_rect_masked <- mask_small_vessel_counts(effort_sum1_rect)
 summary_table <- summarize_sensitive_contribution_by_year(effort_sum1_rect)
-kable(summary_table, caption = "Percent of effort variable that comes from rows with <=3 vessels")
+kable(summary_table, caption = "Percent of effort variable that comes from rows with <3 vessels")
 
 effort_sum1_rect_masked_geo <- merge(effort_sum1_rect_masked, rect, by = "CEstatisticalRectangle", all.x = TRUE)
 
-cat("Note: The maps below are only showing data where > 3 vessels, if 3 vessels or less the rectangle is grey")
+cat("Note: The maps below are only showing data where >= 3 vessels, if less than 3 vessels it is not shown at the map")
 
 plot_fishing_effort_rect_map(2021, effort_sum1_rect_masked_geo)
  
