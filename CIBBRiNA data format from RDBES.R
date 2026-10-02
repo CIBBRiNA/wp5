@@ -2,8 +2,13 @@ library(tidyr)
 library(dplyr)
 library(stringr)
 
-datapath <- "H:/c-users/CIBBRiNA/RDBES"
-outpath <- "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/Outputs/"
+vessel_limit <- 3
+
+#Insert data path
+datapath <- " "
+
+#Insert out path
+outpath <- " "
 gear_gillnet <- c("GND","GNS","GTR","GTN")
 gear_longline <- c("LHM","LHP","LLD","LLS", "LNB","LTL")
 gear_pelagic <- c("OTM","PTM")
@@ -91,7 +96,7 @@ RDBES_agg1_ves_count <- RDBES_agg1_ves %>%
   summarise(n_vessels = n_distinct(CEencryptedVesselIds), .groups = "drop")
 
 RDBES_agg1_m <- merge(RDBES_agg1_tot, RDBES_agg1_ves_count, by=c("CS", "area","year"))
-RDBES_agg1_m$anon <- ifelse(RDBES_agg1_m$n_vessels<3, 'Y','N')
+RDBES_agg1_m$anon <- ifelse(RDBES_agg1_m$n_vessels<vessel_limit, 'Y','N')
 
 RDBES_agg1_coverage <- RDBES_agg1_m %>%
   group_by(CS, year, anon) %>%
@@ -141,7 +146,7 @@ RDBES_agg2a_ves_count <- RDBES_agg2a_ves %>%
   summarise(n_vessels = n_distinct(CEencryptedVesselIds), .groups = "drop")
 
 RDBES_agg2a_m <- merge(RDBES_agg2a_tot, RDBES_agg2a_ves_count, by=c("CS", "year", "area", "quarter"))
-RDBES_agg2a_m$anon <- ifelse(RDBES_agg2a_m$n_vessels<3, 'Y','N')
+RDBES_agg2a_m$anon <- ifelse(RDBES_agg2a_m$n_vessels<vessel_limit, 'Y','N')
 
 RDBES_agg2a_coverage <- RDBES_agg2a_m %>%
   group_by(CS, year, area, anon) %>%
@@ -190,7 +195,7 @@ RDBES_agg2b_ves_count <- RDBES_agg2b_ves %>%
   summarise(n_vessels = n_distinct(CEencryptedVesselIds), .groups = "drop")
 
 RDBES_agg2b_m <- merge(RDBES_agg2b_tot, RDBES_agg2b_ves_count, by=c("CS", "year", "area", "statisticalRectangle", "Gear_lvl4"))
-RDBES_agg2b_m$anon <- ifelse(RDBES_agg2b_m$n_vessels<3, 'Y','N')
+RDBES_agg2b_m$anon <- ifelse(RDBES_agg2b_m$n_vessels<vessel_limit, 'Y','N')
 
 RDBES_agg2b_coverage <- RDBES_agg2b_m %>%
   group_by(CS, year, area, anon) %>%

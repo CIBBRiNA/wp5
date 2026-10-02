@@ -5,11 +5,16 @@ library(csquares)
 library(vmstools)
 library(sf)
 
+vessel_limit <- 3
+
 #Area shapefile
 area <- st_read("Q:\\20-forskning\\12-gis\\Dynamisk\\GEOdata2020\\BasicLayers\\Boundaries\\ICES\\ICES_Areas_20160601_cut_dense_3857.shp", quiet = TRUE)
 
-datapath <- "H:/c-users/CIBBRiNA/CIBBRINA_VMS_Request_2025/"
-outpath <- "Q:/20-forskning/20-dfad/users/joeg/home/VMS/250318_CIBBRiNA/Outputs/"
+#Specify data path
+datapath <- " "
+
+#Specify out path
+outpath <- " "
 
 load(paste(datapath, "CS1_Northern_Gillnets.Rdata", sep = ""))
 load(paste(datapath, "CS2_Southern_Gillnets.Rdata", sep = ""))
@@ -105,7 +110,7 @@ VMS_agg1_m <- VMS_agg1_m %>%
   mutate(
     anon = case_when(
       not_required_flag ~ "N",          # TRUE ≥3 vessels not sensitive
-      n_vessels < 3      ~ "Y",          # <3 vessels  anonymise
+      n_vessels < vessel_limit      ~ "Y",          # <3 vessels  anonymise
       TRUE               ~ "N"           # All other cases not sensitive
     )
   )
@@ -172,7 +177,7 @@ VMS_agg2a_m <- VMS_agg2a_m %>%
   mutate(
     anon = case_when(
       not_required_flag ~ "N",          # TRUE ≥3 vessels not sensitive
-      n_vessels < 3      ~ "Y",          # <3 vessels anonymise
+      n_vessels < vessel_limit      ~ "Y",          # <3 vessels anonymise
       TRUE               ~ "N"           # All other cases not sensitive
     )
   )
@@ -240,7 +245,7 @@ VMS_agg2b_m <- VMS_agg2b_m %>%
   mutate(
     anon = case_when(
       not_required_flag ~ "N",          # TRUE ≥3 vessels not sensitive
-      n_vessels < 3      ~ "Y",          # <3 vessels anonymise
+      n_vessels < vessel_limit      ~ "Y",          # <3 vessels anonymise
       TRUE               ~ "N"           # All other cases not sensitive
     )
   )
@@ -308,7 +313,7 @@ VMS_agg3_m <- VMS_agg3_m %>%
   mutate(
     anon = case_when(
       not_required_flag ~ "N",          # TRUE ≥3 vessels not sensitive
-      n_vessels < 3      ~ "Y",          # <3 vessels anonymise
+      n_vessels < vessel_limit      ~ "Y",          # <3 vessels anonymise
       TRUE               ~ "N"           # All other cases not sensitive
     )
   )
